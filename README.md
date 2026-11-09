@@ -1,278 +1,359 @@
 # MuseAPI-Video · AI 视频创作平台
 
-把 **muse.ai** 的网页端能力包装成一个可对外运营的视频创作站：多用户注册、积分计费、
-账号池调度、任务队列、作品库、运营后台，全部本地自托管。
+把 **muse.ai** 的网页端能力包装成可自托管的视频创作站：导入 muse 账号 → 用账号池额度生成视频 → 在画布上编排。全部跑在本机，不依赖第三方云服务。
 
-上游复用开源项目 [muse2api](https://github.com/czg86389-hub/muse2api)（把 muse.ai 逆向封成
-OpenAI 兼容 API，靠无头 Chrome + CDP 驱动网页端），本仓库在它之上补了一整层**平台业务**。
+上游复用开源项目 [muse2api](https://github.com/czg86389-hub/muse2api)（把 muse.ai 逆向封成 OpenAI 兼容 API，靠无头 Chrome + CDP 驱动网页端）。本仓库在它之上补了平台层。
 
 ```
 ┌──────────────┐   HTTP    ┌─────────────────┐   HTTP    ┌──────────────┐  CDP  ┌────────┐  HTTPS  ┌──────────┐
 │  浏览器 web/  │ ────────► │ 平台 server/     │ ────────► │ 上游 muse2api │ ────► │ Chrome │ ──────► │ muse.ai  │
 │  React SPA   │   :8787   │ Node + SQLite    │  :18610   │ FastAPI      │ :19210│ 无头   │         │ 网页端    │
-└──────────────┘           │ 用户/积分/任务    │           │ 账号池/生成   │       └────────┘         └──────────┘
-                           │ 作品库/账号导入   │           │ 会话续期     │
+└──────────────┘           │ 任务/账号/作品    │           │ 账号池/生成   │       └────────┘         └──────────┘
                            └─────────────────┘           └──────────────┘
 ```
 
-- **上游**负责"怎么让 muse.ai 真的生成出东西"：浏览器驱动、Cookie 会话、附件上传、结果抓取。
-- **平台**负责"怎么卖给用户"：登录注册、积分扣费与退款、任务编排与轮询、媒体落地、账号导入界面、运营后台。
+- **上游**：负责「怎么让 muse.ai 真的生成出东西」——浏览器驱动、Cookie 会话、附件上传、结果抓取。
+- **平台**：负责「怎么用得顺」——登录、账号导入与额度、任务编排、画面预览、画布。
 
-两层解耦，上游升级（`git pull` 上游仓库）不影响平台代码。
+两层解耦。升级上游只需 `cd upstream/muse2api && git pull`，不影响平台代码。
 
 ---
 
-## 功能（精简版：只保留三个）
+## 快速开始
 
-平台视觉对齐 **jimengvip.online（XinMeng AI）**：深色 `#0a0d16` 底 + 品牌绿 `#0fa98a` / 高亮薄荷 `#4fe3c1`，
-标题 Baloo 2、数据 JetBrains Mono、正文霞鹜文楷，字体自托管在 `web/public/fonts/`（离线可用）。
+### 环境
+
+- Windows 10/11（也支持 Linux / macOS；启停脚本目前是 PowerShell）
+- Node.js 20+（本机实测 24.13）
+- Python 3.11（`upstream/muse2api`）
+- Chrome（装在默认路径即可，上游会自动探测）
+
+### 克隆与启动
+
+```powershell
+git clone https://github.com/LIUFelix2004/museAPI-video.git
+cd museAPI-video
+
+.\start.ps1          # 启动上游 + 平台
+.\start.ps1 -Build   # 改过前端后，先构建再启动
+.\stop.ps1           # 全部停止
+```
+
+首次运行会自动创建 Python venv、安装依赖、打包扩展，等它跑完即可。
+
+### 打开
+
+| 入口 | 地址 |
+|---|---|
+| 平台 | <http://127.0.0.1:8787> |
+| 上游面板（调试用） | <http://127.0.0.1:18610/admin?key=m2a_muse_studio_local_2026> |
+
+默认管理员：`admin@muse.local` / `admin123456`
+
+> 对外暴露前，务必改掉 `server/.env` 里的 `ADMIN_PASSWORD` 和 `JWT_SECRET`。
+
+---
+
+## 功能
 
 | 功能 | 路由 | 说明 |
 |---|---|---|
-| **快捷创作** | `/create` | 项目栏 + 任务网格 + WORKBENCH（提示词/@引用参考图/模型/时长/画幅/参数/生成）；附任务队列抽屉与参数面板 |
+| **快捷创作** | `/create` | 项目栏 + 任务网格 + WORKBENCH：提示词、`@` 引用参考图、模型/时长/画幅、参数面板、任务队列、生成 |
 | **无限画布** | `/canvas` | 节点拖拽、缩放平移、多选删除、双击改文本、自动保存、节点级生成 |
-| **muse 导入** | `/accounts` | 一键绑定（浏览器扩展读 HttpOnly Cookie）或手动粘贴；检测/保活/删除 |
+| **muse 导入** | `/accounts` | 三种导入方式、额度查询、检测、保活、删除 |
 
-登录后直接落在 `/create`。侧栏只有这三项。
+登录后直接进入 `/create`，侧栏只有这三项。
 
-**已下线**（源码保留在 `web/src/pages/`，需要时把 import 和 Route 加回 `App.jsx` 即可）：
-首页 `/home`、论坛 `/forum`、价目表 `/pricing`、会员 `/membership`、充值 `/recharge`、
-邀请 `/invite`、团队 `/team`、设置 `/settings`、历史 `/history`、作品库 `/works`、
-API 平台 `/api-platform`、运营后台 `/admin`。
+> 其余页面（首页、论坛、会员、充值、邀请、团队、API 平台、设置、历史、运营后台）已下线，源码仍在 `web/src/pages/`。需要时在 `App.jsx` 里加回 import 和 Route 即可。
 
-这些模块的**后端接口仍然可用**（计费、邀请、团队、社区、密钥、`/v1` 代理都没删），
-只是前端不再暴露入口；直接访问旧地址会兜底跳回 `/create`。
+---
 
+## 账号导入（重点）
 
-### OpenAI 兼容接口
+**没有导入账号，平台什么都生成不了。** 平台本身不产生内容，只是把你的 muse.ai 账号变成可调用的生成能力——每次点「生成」，上游都会用你导入的账号去 muse.ai 网页端跑一遍。
 
-平台对外暴露 `/v1/*`，用 `sk-xm-` 密钥鉴权，内部转发到上游 muse2api：
+### 为什么不能直接复制 Cookie
 
-```bash
-curl "$BASE/v1/models" -H "Authorization: Bearer sk-xm-..."
-curl -X POST "$BASE/v1/videos" -H "Authorization: Bearer sk-xm-..." \
-  -H "Content-Type: application/json" \
-  -d '{"prompt":"雨夜霓虹街头","duration":5,"size":"16:9"}'
+muse.ai 的登录态主要靠 `hatch_sess`，它是 **HttpOnly** Cookie：
+
+- 在页面里执行 `document.cookie` —— **读不到它**
+- DevTools → Application 能看到它，但那是浏览器内部视图，网页 JS 访问不到
+
+想拿到它，只有三条路：**浏览器扩展**（能读 HttpOnly）、**从网络请求头里抄**、或 **让上游自己的浏览器登录一次**。下面三种导入方式对应这三条路。
+
+### 三种方式对比
+
+| 方式 | 是否手拷 Cookie | 需要什么 | 适合 |
+|---|---|---|---|
+| **一、一键绑定**（推荐） | 不用 | 装一次浏览器扩展 | 日常使用，最省事 |
+| **二、手动粘贴** | 要，从 Network 面板抄 | 会用 DevTools | 不想装扩展，或临时加号 |
+| **三、上游面板直连** | 不用 | 上游 key | 调试，或用上游自带导号工具 |
+
+---
+
+### 方式一：一键绑定（推荐）
+
+原理：平台页面生成一次性绑定码 → 扩展在浏览器里读出 muse.ai 的全部 Cookie（含 HttpOnly）→ 提交给平台 → 平台转给上游入库。
+
+#### 第 1 步：安装扩展（只需一次）
+
+1. 打开平台 → 左侧 **muse 导入** → 点右上角 **「一键绑定」**
+2. 在弹窗里展开「还没装扩展？」，点 **「下载扩展包 (.zip)」**  
+   （也可以直接用仓库里的 `extension/` 目录）
+3. 解压到一个**不会被删**的固定位置
+4. Chrome 地址栏输入 `chrome://extensions`
+5. 打开右上角 **「开发者模式」**
+6. 点 **「加载已解压的扩展程序」**，选刚才解压出来的文件夹
+7. 工具栏出现扩展图标即成功
+
+> 更新过扩展代码后，要回 `chrome://extensions` 点一次「重新加载」，否则浏览器还在跑旧代码。
+
+#### 第 2 步：确保这个浏览器已登录 muse.ai
+
+打开 <https://muse.ai/>，能看到聊天界面即可。
+
+**扩展读的是「你点绑定按钮的那个浏览器」里的登录态，不是服务器上的。** 若在 A 电脑装扩展、在 B 电脑登录 muse.ai，绑不上。
+
+#### 第 3 步：绑定
+
+两种走法任选其一：
+
+**走法 A（自动）**
+
+1. 平台点 **「一键绑定」** → 生成绑定码
+2. 点弹窗里的 **「打开」**（跳到 `/bind/<码>`）
+3. 扩展检测到绑定码 → 自动读 Cookie → 提交 → 页面显示「绑定成功」
+
+**走法 B（手动填码，适合给第二个账号用）**
+
+1. 平台点 **「一键绑定」**，复制 **绑定码**
+2. 点浏览器工具栏的扩展图标
+3. 三个框这样填：
+
+   | 框 | 填什么 |
+   |---|---|
+   | 平台地址 | `http://127.0.0.1:8787`（部署在服务器就填服务器地址） |
+   | 绑定码 | 刚才复制的那个 |
+   | 备注名 | 随便，比如「主号」，可留空 |
+
+4. 点 **「读取并绑定」**
+
+> 绑定码 **20 分钟有效**，且只能用一次。过期了就回平台重新点「一键绑定」。多账号请各自生成新码。
+
+#### 一键绑定失败排查
+
+| 提示 | 原因 | 怎么办 |
+|---|---|---|
+| 没有读到 Cookie | 当前浏览器没登录 muse.ai | 先登录再试 |
+| 读到 N 条但没有 hatch_sess | 登录态不对或已失效 | 重新登录 muse.ai |
+| 该绑定码已使用过 | 重复提交 | 重新生成一个码 |
+| 绑定码已过期 | 超过 20 分钟 | 重新生成一个码 |
+| 扩展没有响应 | 扩展被禁用 / 页面没刷新 | 在 `chrome://extensions` 确认已启用，再刷新页面 |
+
+---
+
+### 方式二：手动粘贴 Cookie
+
+不想装扩展，或只想临时加个账号时用这个。
+
+#### 需要哪些 Cookie
+
+| Cookie | 必要性 | 说明 |
+|---|---|---|
+| **`hatch_sess`** | **必须有** | 登录会话本身，缺它平台会直接拒绝 |
+| `hatch_vml` | 强烈建议 | 决定账号剩余有效期（约 48 小时） |
+| `hatch_gw` | 可选 | 路由缓存，上游会自己重新签发 |
+| 其他（`datr`、`dpr`、`theme`、`wd`、`_fbp`…） | 不需要 | 与登录态无关 |
+
+#### ✅ 推荐：从 Network 面板复制完整 Cookie 头
+
+一次复制全部，格式天然正确，最不容易出错。
+
+1. 在已登录 muse.ai 的标签页按 `F12`
+2. 切到 **Network**
+3. 按 `F5` 刷新
+4. 点任意一条发往 `muse.ai` 的请求（例如 `graphql`）
+5. 右侧 **Headers** → **Request Headers**
+6. 找到以 `cookie:` 开头的那一行
+7. **右键 → Copy value**
+8. 回到平台 → 「muse 导入」→ **「粘贴」** → 粘贴 → 起备注名 → 导入
+
+复制出来大概长这样：
+
+```
+hatch_sess=eyJhbGciOi...; hatch_vml=v1%3A...; hatch_native_auth_device=...; datr=...; _fbp=...
 ```
 
-密钥在 **API 平台**页生成；调用走站内积分计费。
+#### ❌ 不推荐：在 Application → Cookies 表格里逐个复制
+
+能用，但容易出错：
+
+1. 表格里的值常被截断，`hatch_sess` 可能要往下滚才看得见
+2. 点 Value 只能一次复制一个，还得自己补 `名字=` 前缀、拼分号
+3. 漏掉 `hatch_vml` 会让有效期估算不准
+
+如果只能从表格抄，最少要这两个，并手工拼成：`hatch_sess=值; hatch_vml=值`
+
+- `hatch_sess`（表格里可能显示成 `hatch_s...`，800+ 字节的那行）
+- `hatch_vml`（紧挨着的下一行）
+
+#### 粘贴时的容错
+
+平台解析比较宽松，下面这些都能吃：
+
+- 带 `Cookie:` 前缀 → 自动去掉
+- 多行粘贴 → 自动合并成 `; ` 分隔
+- 从表格复制的制表符分隔 → 一般也能识别
+
+但**只复制 Value、不带名字**不行，必须有 `hatch_sess=` 前缀。
+
+---
+
+### 方式三：上游面板直连
+
+也可以在上游管理页直接导号：<http://127.0.0.1:18610/admin>
+
+- **Chrome 扩展**：`upstream/muse2api/extension/`，填服务地址 `http://127.0.0.1:18610` + Key
+- **油猴脚本**：`upstream/muse2api/tools/muse2api_cookie_importer.user.js`
+
+这种方式导入的账号归属为空，即「公共池」，平台上所有用户共用。
+
+---
+
+### 账号管理
+
+#### 状态含义
+
+| 状态 | 含义 |
+|---|---|
+| 可用（绿） | 最近一次检测通过 |
+| 待检测（黄） | 刚导入，还没验证过 |
+| 异常（红） | 检测失败，多半是 Cookie 过期 |
+| 上游已删 | 上游账号池里没有了（在别处删过） |
+
+#### 额度
+
+导入后点账号卡片上的 **「点此查询」**（或页面顶部「刷新」的额度汇总），平台会调上游打开浏览器去 muse.ai 设置页读一次额度，返回：
+
+- **周额度已用百分比**（muse 免费版按周限额）
+- **重置日期**
+- **额外额度**（通常是「剩余 xx 亿个词元」）
+
+顶栏 `1 账号 · 剩 60%` 就来自这里。多账号时显示平均值；账号页另有「额度合计」（各账号余量相加，例如三个账号剩 60/40/20% → 合计 120%）。
+
+> 额度**不会自动刷新**——查询要开浏览器读页面，比较重。因此是手动触发 + 60 秒本地缓存。
+
+#### 有效期
+
+muse 会话约 **48 小时**。到期后：
+
+- 账号状态会变成「异常」
+- 生成请求会返回 401
+
+重新导入一次即可。点 **「保活」** 可让上游尝试续期（不保证成功，取决于上游是否重新签发）。
+
+#### 多账号
+
+账号池按「最久未用」自动轮转，互不阻塞。给每个账号单独生成绑定码即可。
+
+---
+
+## 使用
+
+### 快捷创作 `/create`
+
+1. 在底部 WORKBENCH 写画面描述
+2. 可选：点「图片」上传参考图（最多 3 张），正文里用 `@` 引用
+3. 选时长（5 / 6 / 8 / 10 秒）和画幅（16:9 / 9:16 / 1:1）
+4. 点 **「生成」**
+
+任务状态在中间网格实时刷新；完成后可预览、下载、删除。
+
+**参数面板**：WORKBENCH 里的「参数」按钮，可调 Stylize / Chaos / Weird / IW / CW / SW / Seed / Quality，会拼成 `--st 100 --chaos 20` 这类字符串传给上游。
+
+**任务队列**：点「+ 加入自动执行队列」，可按固定间隔自动重复提交同一提示词，支持暂停、恢复、上下移、清理已完成。
+
+### 无限画布 `/canvas`
+
+- 拖动节点、滚轮缩放、空格 / 中键拖动平移
+- `Shift` 多选、`Delete` 删除、双击改文本
+- 底部输入区写提示词 → 生成结果作为新节点出现
+- 改动自动保存到浏览器本地
 
 ---
 
 ## 目录结构
 
 ```
-G:\museAPI\
-├── start.ps1              # 一键启动（上游 + 平台）
-├── stop.ps1               # 全部停止
-├── upstream\muse2api\     # 上游引擎（Python FastAPI，端口 18610）
-│   ├── .env               # 已配置：KEY / Chrome 路径 / 超时
-│   └── .venv\             # Python 3.11 虚拟环境
-├── server\                # 平台后端（Node ESM，端口 8787）
-│   ├── .env               # 平台配置（JWT、上游地址、定价）
-│   ├── public\            # 扩展打包下载（museapi-video-extension.zip）
-│   ├── src\
-│   │   ├── index.js       # 入口：路由挂载、静态资源、引导管理员
-│   │   ├── config.js      # 配置读取
-│   │   ├── db.js          # SQLite schema + 任务/账号/账本/绑定码读写（node:sqlite）
-│   │   ├── muse.js        # 上游客户端（账号池、视频、图片、媒体下载）
-│   │   ├── auth.js        # bcrypt + JWT + 权限中间件
-│   │   ├── worker.js      # 任务轮询器：轮询上游 → 落地媒体 → 失败退款
-│   │   └── routes\        # auth / accounts（含绑定码）/ generate / admin
-│   └── data\              # 运行时数据（SQLite、媒体、上传）
-├── extension\             # 浏览器扩展：一键读取 HttpOnly cookie 完成绑定
-│   ├── manifest.json      # MV3：cookies + content script
-│   ├── background.js      # 读 muse.ai cookie → POST /api/accounts/bind
-│   ├── content.js         # 在 /bind/<code> 页面自动触发
-│   └── popup.html/js      # 手动兜底入口
-├── web\                   # 平台前端（React 18 + Vite + Tailwind v4）
-│   ├── public\fonts\      # 自托管字体（Baloo 2 / JetBrains Mono）
-│   └── src\pages\         # Home / Create / Canvas / History / Pricing / Membership
-│                          # Recharge / Invite / Forum / ApiPlatform / Settings
-│                          # Accounts / Credits / Admin / Login / Bind
-├── scripts\               # 冒烟测试、截图验证、链路测试
-└── shots\                 # UI 截图
+museAPI-video/
+├── start.ps1 / stop.ps1     一键启停
+├── extension/               浏览器扩展（一键绑定）
+│   ├── manifest.json
+│   ├── background.js        读 muse.ai Cookie → POST /api/accounts/bind
+│   ├── content.js           在 /bind/<码> 页面自动触发
+│   └── popup.html/js        手动填码入口
+├── upstream/muse2api/       上游引擎（Python FastAPI，未改动）
+│   ├── .env                 上游配置（KEY / Chrome 路径 / 超时）
+│   └── .venv/
+├── server/                  平台后端（Node + SQLite）
+│   ├── .env                 JWT / 上游地址 / 管理员
+│   ├── public/              扩展打包下载
+│   ├── data/                SQLite、媒体、上传（备份就打包这个）
+│   └── src/
+│       ├── index.js         入口
+│       ├── db.js            表结构与读写
+│       ├── muse.js          上游客户端
+│       ├── auth.js          登录
+│       ├── worker.js        任务轮询 + 队列调度
+│       └── routes/          auth / accounts / generate / queue / chat …
+└── web/                     前端（React + Vite + Tailwind）
+    ├── public/fonts/        自托管字体
+    └── src/pages/           Create / Canvas / Accounts / Login / Bind
 ```
 
 ---
 
-## 快速开始
+## 配置
 
-```powershell
-cd G:\museAPI
+`server/.env`：
 
-# 首次：构建前端 + 拉起全部服务
-.\start.ps1 -Build
-
-# 之后日常启动
-.\start.ps1
-
-# 前端改动用 dev 模式（热更新，5173）
-.\start.ps1 -Dev
-
-# 停止全部
-.\stop.ps1
-```
-
-打开 <http://127.0.0.1:8787>，用默认管理员登录：
-
-```
-admin@muse.local / admin123456
-```
-
-> 生产部署前务必改掉 `.env` 里的 `ADMIN_PASSWORD` 和 `JWT_SECRET`。
-
-上游面板（调试用）：<http://127.0.0.1:18610/admin?key=m2a_muse_studio_local_2026>
-
----
-
-## 账号导入（核心流程）
-
-平台要生成任何东西，**上游必须至少有一个可用 muse.ai 账号**。没有账号时上游会直接返回
-`没有可用账号`，平台会自动退还积分。
-
-### 方式一：一键绑定（推荐，免 F12）
-
-`hatch_sess` 是 **HttpOnly** cookie，网页 JS 读不到，所以必须由浏览器扩展来读。
-装一次扩展，之后每次绑定只要三步：
-
-1. 平台 **账号管理 → 一键绑定** → 生成绑定链接（20 分钟有效）
-2. 复制链接，在**已登录 muse.ai 的那个浏览器**里打开
-3. 扩展自动读取登录态并提交，页面显示「绑定成功」
-
-扩展装一次即可，之后无需再碰 F12：
-
-- 下载：平台的管理页会打包 `extension/` 到 `server/public/museapi-video-extension.zip`，
-  也可以直接跑 `.\scripts\build-extension.ps1`
-- 安装：`chrome://extensions` → 打开右上角「开发者模式」→「加载已解压的扩展程序」→ 选 `extension\` 目录
-- 它只做一件事：用 `chrome.cookies` 读 muse.ai 的 cookie，POST 到平台的一次性绑定接口，不碰别的数据
-
-绑定码是一次性的、20 分钟过期、绑定到生成它的那个用户。
-
-### 方式二：手动粘贴 Cookie（兜底）
-
-不想装扩展时用这个：
-
-1. Chrome 打开 <https://muse.ai/>，登录并进入聊天主界面。
-2. 按 `F12` → **Application → Cookies → https://muse.ai**。
-3. 复制整段 Cookie（至少要含 `hatch_sess`），或按 `Ctrl+A` 全选后复制。
-4. 平台里进 **账号管理 → 粘贴**，粘贴、起个备注名、保存。
-
-也可以直接粘贴 `document.cookie` 的输出，格式随意，带不带 `Cookie:` 前缀都能识别，
-多行会自动清理成 `; ` 分隔。
-
-### 方式三：上游自带的导号工具
-
-如果已经在用上游面板，也可以直接用它的工具（导入进的是同一个账号池）：
-
-- Chrome 扩展：`upstream\muse2api\extension\`（填服务地址 `http://<IP>:18610` + Key）
-- 油猴脚本：`upstream\muse2api\tools\muse2api_cookie_importer.user.js`
-
-这种方式导入的账号归属为空，即公共池。
-
-### 账号有效期
-
-Muse 会话约 **48 小时**，到期后上游返回 401，需要重新导入 Cookie。账号卡片上会显示到期时间，
-快过期时变黄。点「保活」可以让上游尝试续期，点「检测」验证会话状态。
-
-### 账号归属
-
-- **管理员**导入的账号 → 进入公共池，所有用户共用（适合对外运营）。
-- **普通用户**导入的账号 → 只自己可见，优先给自己用。
-
----
-
-## 平台 API
-
-所有接口都在 `/api` 下，除注册登录外都要 `Authorization: Bearer <token>`。
-
-| 方法 | 路径 | 说明 |
+| 变量 | 默认 | 说明 |
 |---|---|---|
-| POST | `/api/auth/register` | 注册（赠送积分可配） |
-| POST | `/api/auth/login` | 登录，返回 JWT |
-| GET | `/api/auth/me` | 当前用户与余额 |
-| GET | `/api/auth/ledger` | 积分流水 |
-| GET | `/api/meta` | 时长/画幅/定价 |
-| POST | `/api/videos` | 创建视频任务 `{prompt,duration,size,images[]}` |
-| POST | `/api/images` | 创建图片任务 `{prompt,size,images[]}` |
-| GET | `/api/jobs` | 任务列表（分页/筛选） |
-| GET | `/api/jobs/:id` | 任务详情（前端轮询用） |
-| DELETE | `/api/jobs/:id` | 删除任务与本地媒体 |
-| POST | `/api/upload` | 上传参考素材（multipart，最多 10 个） |
-| GET | `/api/accounts` | 账号池（含上游实时状态） |
-| POST | `/api/accounts` | **导入账号** `{label,cookie}` |
-| POST | `/api/accounts/bind-code` | 生成一次性绑定码（20 分钟） |
-| GET | `/api/accounts/bind/:code` | 查绑定状态（绑定页轮询） |
-| POST | `/api/accounts/bind` | **扩展提交** `{code,cookie}`，用 code 认证 |
-| POST | `/api/accounts/:id/test` | 检测会话 |
-| POST | `/api/accounts/:id/keepalive` | 保活续期 |
-| DELETE | `/api/accounts/:id` | 删除账号 |
-| GET | `/api/admin/overview` | 运营概览 |
-| GET/PATCH | `/api/admin/users[/:id]` | 用户管理 / 加减积分 / 封禁 |
-| GET/PATCH | `/api/admin/settings` | 站点名、定价、注册开关 |
-| GET | `/api/admin/system` | 上游状态（浏览器、账号池、超时） |
-| GET | `/api/admin/orders` | 订单（充值/订阅） |
-| GET | `/api/admin/posts` | 社区帖子管理 |
-| GET | `/api/admin/trend` | 近 7 天趋势 |
-| GET/POST | `/api/keys` | API 密钥（sk-xm-） |
-| GET/POST | `/api/membership` | 会员档位 / 订阅 |
-| POST | `/api/recharge` | 充值（1 元 = 10 积分） |
-| GET/POST | `/api/posts` | 社区帖子 |
-| GET | `/api/auth/invite` | 邀请码与邀请记录 |
-| ALL | `/v1/*` | **OpenAI 兼容对外接口**（sk- 鉴权，转发上游） |
+| `PORT` | 8787 | 平台端口 |
+| `MUSE_BASE` | `http://127.0.0.1:18610` | 上游地址 |
+| `MUSE_KEY` | `m2a_muse_studio_local_2026` | 上游 key（须与上游 `.env` 一致） |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | `admin@muse.local` / `admin123456` | 首次启动创建的管理员 |
+| `JWT_SECRET` | 随机 | 登录签名密钥，**生产必换** |
 
-### 一个完整的下单链路
+`upstream/muse2api/.env`：
 
-```
-POST /api/videos
-  ↓ 校验余额 → 扣积分 → 落库 jobs(status=queued)
-  ↓ 调上游 POST /v1/videos  → 拿到 task_id
-  ↓ 回写 jobs(upstream_id, status=processing)
-         ↓ worker 每 3 秒轮询 GET /v1/videos/{task_id}
-         ↓ completed → 下载 mp4 到 server/data/media/ → jobs(media_file)
-         ↓ failed    → 自动退还积分 → jobs(refunded=1)
-GET /api/jobs/{id}  ← 前端每 2.5 秒轮询
-```
-
----
-
-## 计费模型
-
-默认：**视频 = 10 + 2 × 时长秒**（5s = 20 积分，10s = 30 积分），**图片 5 积分**。
-注册送 100 积分。全部可在后台「设置」里改，改完立即对新任务生效。
-
-失败自动退款，重复退款有 `refunded` 标记保护。
-
----
-
-## 数据与备份
-
-| 内容 | 位置 |
-|---|---|
-| 用户、任务、积分、账号镜像 | `server\data\studio.db`（SQLite WAL） |
-| 生成的视频/图片 | `server\data\media\` |
-| 用户上传的参考素材 | `server\data\uploads\` |
-| 上游账号 Cookie、上游任务 | `upstream\muse2api\data\` |
-
-备份就打包这两个 `data\` 目录。**Cookie 是明文存储的**，注意目录权限。
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `MUSE2API_CHROMIUM` | 自动探测 | Chrome 路径 |
+| `MUSE2API_VIDEO_TIMEOUT` | 900 | 视频生成超时（秒） |
+| `MUSE2API_CONCURRENCY` | 2 | 最大并发任务数 |
 
 ---
 
 ## 常见问题
 
-**上游报「没有可用账号」**
-账号池是空的，按上面「账号导入」加一个。平台的账号管理页会在顶部提示。
+**Q：导入成功了，但点生成提示「没有可用账号」**  
+上游账号池为空，或账号状态是「异常」。去 muse 导入页看卡片状态，点「检测」确认。
 
-**上游 401 / 403**
-401 是会话过期，重新导入 Cookie。403 是账号权限或出口 IP 被限制，不一定是 Cookie 问题，
-先确认这个账号在官网还能正常用。
+**Q：DevTools 的 Cookies 里找不到 `hatch_sess`**  
+表格按字母排序，`hatch_sess` 在 `hatch_gw`、`hatch_native_auth_device` 下面，往下滚。若确实没有，说明这个浏览器没有登录成功。
 
-**生成很慢 / 一直排队**
-上游默认并发 2（`MUSE2API_CONCURRENCY`）。机器够强可以调大，但每个并发会占一个浏览器上下文。
-视频超时默认 900 秒，在 `upstream\muse2api\.env` 里改 `MUSE2API_VIDEO_TIMEOUT`。
+**Q：`document.cookie` 里没有 `hatch_sess`**  
+正常。它是 HttpOnly，JS 读不到。用 Network 面板或扩展。
 
-**部署到服务器后 502**
-Nginx 反代要放大超时并关 buffering：
+**Q：生成一直卡在「生成中」**  
+上游在跑浏览器，第一次启动 Chrome 会慢一些。超过 15 分钟会自动判失败并退还。若一直不动，看 `upstream/muse2api/server.log`。
+
+**Q：账号只用了几天就「异常」了**  
+muse 会话约 48 小时，属正常。重新绑定即可。
+
+**Q：部署到服务器后打不开或 401**  
+检查 `server/.env` 的 `MUSE_BASE` 是否指向上游；Nginx 反代建议放大超时并关闭 buffering：
 
 ```nginx
 location / {
@@ -284,41 +365,33 @@ location / {
 }
 ```
 
-**想换端口 / 加域名**
-改 `server\.env` 的 `PORT` 和 `PUBLIC_BASE`；上游端口改 `upstream\muse2api\.env` 的
-`MUSE2API_PORT`，同时改 `server\.env` 的 `MUSE_BASE` 指向新端口。
-
-**参考图怎么传给上游**
-平台把用户上传的图读成 `data:` URL 再传给上游，所以上游不需要能访问平台的本地文件，
-也不用开 `MUSE2API_REF_IMAGE_LOCAL_FILES`。
+**Q：扩展旧版还能用吗**  
+绑定通信标识已改为 `museapi-video-ext`。装过旧版的，请在 `chrome://extensions` 点一次「重新加载」，或删掉后重新加载新目录。
 
 ---
 
-## 验证脚本
+## 排错时看哪里
+
+| 文件 | 内容 |
+|---|---|
+| `server/server.log` | 平台日志（任务轮询、队列调度） |
+| `server/server.err.log` | 平台异常 |
+| `upstream/muse2api/server.log` | 上游日志（浏览器、生成） |
+| `upstream/muse2api/server.err.log` | 上游异常 |
+
+平台数据库：`server/data/studio.db`（SQLite）。账号、任务、队列都在这里。
+
+一键体检：
 
 ```powershell
-node scripts/smoke.mjs                # 接口冒烟（9 项）
-node scripts/test-bind.mjs            # 一键绑定链路：生成码 → 提交 → 入库 → 码失效（8 项）
-node scripts/test-extension-logic.mjs # 沙箱执行 background.js + manifest 校验（14 项）
-node scripts/test-failure-path.mjs    # 无账号下单 → 自动退款链路
-node scripts/test-success-mock.mjs    # mock 上游 → 媒体落地 → 作品库可读
-node scripts/test-upstream-timing.mjs # 上游任务查询时序
-node scripts/shots.mjs                # 登录并逐页截图到 shots\
-node scripts/shots-bind.mjs           # 截一键绑定弹窗与绑定页
+node scripts/acceptance.mjs            # 路由 + 接口 + 鉴权边界
+node scripts/test-bind.mjs             # 一键绑定链路
+node scripts/test-extension-logic.mjs  # 扩展逻辑（沙箱执行 background.js）
 ```
-
-> 扩展本身无法用 puppeteer 加载验证：Chrome 137+ 起，`--load-extension` 在自动化环境下被禁用
-> （实测 Chrome 157 无论 headless 还是 headful 都不加载，加 `--enable-unsafe-extension-debugging` 也无效）。
-> 因此 `test-extension-logic.mjs` 改为用 `node:vm` 在沙箱里**真实执行** `background.js`，
-> 注入 mock 的 `chrome.cookies`，断言它读 cookie、拼接、提交、处理无 cookie 分支的行为。
-> 「Chrome 能否加载扩展」这一环仍需人工装一次确认。
 
 ---
 
-## 与参考仓库的关系
+## 许可与致谢
 
-- 上游 `upstream/muse2api` 是 [czg86389-hub/muse2api](https://github.com/czg86389-hub/muse2api)（MIT）的
-  完整克隆，未经修改，只加了 `.env` 与 `.venv`。它负责浏览器自动化和账号池。
-- 平台层（`server/` + `web/`）是本仓库新增，负责多用户、计费、任务编排、作品库与运营界面。
-
-升级上游：`cd upstream\muse2api && git pull`，然后 `.\stop.ps1; .\start.ps1`。
+- 上游引擎：[muse2api](https://github.com/czg86389-hub/muse2api)
+- 本仓库平台层按仓库内文件约定使用；对外部署请自行遵守 muse.ai 服务条款
