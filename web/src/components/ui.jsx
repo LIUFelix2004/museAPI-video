@@ -12,12 +12,11 @@ export function Button({ variant = 'primary', size = 'md', className, loading, c
     lg: 'h-11 px-5 text-[15px]',
   };
   const variants = {
-    primary:
-      'brand-gradient text-white shadow-lg shadow-brand-600/25 hover:brightness-110 active:scale-[.985]',
-    ghost: 'text-mist-300 hover:text-white hover:bg-ink-700/70',
-    outline: 'border border-ink-600 text-mist-200 hover:border-ink-500 hover:bg-ink-800',
+    primary: 'mint-btn font-semibold',
+    ghost: 'text-mist-300 hover:text-white hover:bg-white/5',
+    outline: 'border border-white/10 bg-white/[0.02] text-mist-100 hover:border-white/20 hover:bg-white/5',
     danger: 'bg-rose-500/15 text-rose-300 border border-rose-500/30 hover:bg-rose-500/25',
-    soft: 'bg-ink-700 text-mist-200 hover:bg-ink-600',
+    soft: 'border border-white/[0.06] bg-white/[0.03] text-mist-200 hover:border-white/15 hover:bg-white/[0.06]',
   };
   return (
     <button
@@ -58,7 +57,7 @@ export function Field({ label, hint, children, className }) {
 }
 
 const inputCls =
-  'w-full rounded-xl bg-ink-900 border border-ink-700 px-3.5 py-2.5 text-sm text-mist-200 placeholder:text-ink-500 outline-none transition focus:border-brand-500/70 focus:ring-2 focus:ring-brand-500/15';
+  'w-full rounded-xl bg-[#0d111c] border border-white/[0.07] px-3.5 py-2.5 text-sm text-mist-200 placeholder:text-ink-500 outline-none transition focus:border-brand-500/70 focus:ring-2 focus:ring-brand-500/15';
 
 export function Input({ className, ...rest }) {
   return <input className={clsx(inputCls, className)} {...rest} />;
@@ -77,22 +76,26 @@ export function Select({ className, children, ...rest }) {
 }
 
 /* -------------------------------- Badge -------------------------------- */
-export function Badge({ tone = 'neutral', children, className }) {
+export function Badge({ tone = 'neutral', dot = false, children, className }) {
   const tones = {
-    neutral: 'bg-ink-700 text-mist-300',
-    ok: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/25',
-    warn: 'bg-amber-500/15 text-amber-300 border border-amber-500/25',
-    error: 'bg-rose-500/15 text-rose-300 border border-rose-500/25',
-    brand: 'bg-brand-500/15 text-brand-400 border border-brand-500/30',
+    neutral: 'bg-white/5 text-mist-300',
+    ok: 'bg-emerald-500/12 text-emerald-300',
+    warn: 'bg-amber-500/12 text-amber-300',
+    error: 'bg-rose-500/12 text-rose-300',
+    brand: 'bg-brand-500/15 text-brand-300',
+  };
+  const dots = {
+    neutral: 'bg-mist-400', ok: 'bg-emerald-400', warn: 'bg-amber-400', error: 'bg-rose-400', brand: 'bg-brand-400',
   };
   return (
     <span
       className={clsx(
-        'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium',
+        'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium',
         tones[tone],
         className
       )}
     >
+      {dot && <span className={clsx('h-1.5 w-1.5 rounded-full', dots[tone])} />}
       {children}
     </span>
   );
@@ -112,7 +115,7 @@ export function Modal({ open, onClose, title, children, width = 'max-w-lg' }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
       <div className={clsx('card relative w-full fade-in shadow-2xl', width)}>
-        <div className="flex items-center justify-between border-b border-ink-700 px-5 py-3.5">
+        <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-3.5">
           <h3 className="text-[15px] font-semibold text-white">{title}</h3>
           <button onClick={onClose} className="rounded-lg p-1.5 text-mist-400 hover:bg-ink-700 hover:text-white">
             <X size={16} />
@@ -175,6 +178,40 @@ export function Empty({ icon: Icon, title, desc, action }) {
         {desc && <p className="mt-1 text-[13px] text-mist-400">{desc}</p>}
       </div>
       {action}
+    </div>
+  );
+}
+
+/* ------------------------------- Drawer ------------------------------- */
+export function Drawer({ open, onClose, title, subtitle, children, width = 'w-[380px]' }) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => e.key === 'Escape' && onClose?.();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      <div className="absolute inset-0 bg-black/45 backdrop-blur-[2px]" onClick={onClose} />
+      <aside
+        className={clsx(
+          'relative flex h-full max-w-full flex-col border-l border-white/[0.06] bg-[#0f1320] shadow-2xl fade-in',
+          width
+        )}
+      >
+        <div className="flex items-start justify-between px-6 pb-4 pt-6">
+          <div>
+            <h3 className="text-[17px] font-semibold text-white">{title}</h3>
+            {subtitle && <p className="mt-1 text-[12px] text-mist-400">{subtitle}</p>}
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-mist-400 hover:bg-white/5 hover:text-white">
+            <X size={17} />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">{children}</div>
+      </aside>
     </div>
   );
 }

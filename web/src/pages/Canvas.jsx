@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Plus, Type, Image as ImageIcon, Film, Trash2, ZoomIn, ZoomOut, Maximize2,
-  FolderClosed, Scissors, Grid3x3, Loader2, X, Sparkles, Link2, Send, MousePointer2,
+  Type, Image as ImageIcon, Video, Trash2, ZoomIn, ZoomOut, Maximize, Loader2, X, Sparkles,
+  MousePointer2, Hand, ImagePlus, ChevronDown, Map as MapIcon, Expand,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { api } from '../lib/api.js';
@@ -10,8 +10,9 @@ import { useToast } from '../components/ui.jsx';
 
 const STORE_KEY = 'xm_canvas_v1';
 
-const NODE_W = 168;
-const NODE_H = 96;
+const NODE_W = 260;
+const NODE_H = 170;
+const nodeH = (n) => (n.type === 'text' ? 150 : 210);
 
 let seq = 1;
 const newId = () => `n_${Date.now().toString(36)}_${seq++}`;
@@ -49,6 +50,8 @@ export default function Canvas() {
   const [saved, setSaved] = useState(true);
   const [duration, setDuration] = useState(5);
   const [size, setSize] = useState('16:9');
+  const [tool, setTool] = useState('select'); // select | hand
+  const [vpSize, setVpSize] = useState({ w: 800, h: 500 });
 
   const viewportRef = useRef(null);
   const dragRef = useRef(null); // { mode:'pan'|'node', ... }
@@ -108,7 +111,7 @@ export default function Canvas() {
     const isMiddle = e.button === 1;
     const isSpace = e.getModifierState?.(' ') || false;
     // 只有空白处、中键、按住空格时平移
-    if (!isMiddle && !isSpace && e.target !== e.currentTarget && !e.target.dataset.canvasbg) return;
+    if (tool !== 'hand' && !isMiddle && !isSpace && e.target !== e.currentTarget && !e.target.dataset.canvasbg) return;
     setSelected([]);
     dragRef.current = {
       mode: 'pan',
@@ -120,6 +123,7 @@ export default function Canvas() {
   };
 
   const onNodeDown = (e, node) => {
+    if (tool === 'hand') return; // 抓手模式：交给画布平移
     e.stopPropagation();
     if (e.button === 2) return;
     const multi = e.shiftKey;
@@ -188,9 +192,11 @@ export default function Canvas() {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (!selected.length) return;
         e.preventDefault();
-        setDoc((d) => ({ ...d, nodes: d.nodes.filter((n) => !selected.includes(n.id)) }));
+        setDoc((d) => pruneLinks({ ...d, nodes: d.nodes.filter((n) => !selected.includes(n.id)) }));
         setSelected([]);
       }
+      if (e.key === 'v' || e.key === 'V') setTool('select');
+      if (e.key === 'h' || e.key === 'H') setTool('hand');
       if (e.key === 'Escape') setSelected([]);
     };
     window.addEventListener('keydown', onKey);
@@ -216,7 +222,7 @@ export default function Canvas() {
   };
 
   const removeSelected = () => {
-    setDoc((d) => ({ ...d, nodes: d.nodes.filter((n) => !selected.includes(n.id)) }));
+    setDoc((d) => pruneLinks({ ...d, nodes: d.nodes.filter((n) => !selected.includes(n.id)) }));
     setSelected([]);
   };
 
@@ -225,7 +231,7 @@ export default function Canvas() {
     const minX = Math.min(...doc.nodes.map((n) => n.x));
     const minY = Math.min(...doc.nodes.map((n) => n.y));
     const maxX = Math.max(...doc.nodes.map((n) => n.x + NODE_W));
-    const maxY = Math.max(...doc.nodes.map((n) => n.y + NODE_H));
+    const maxY = Math.max(...doc.nodes.map((n) => n.y + nodeH(n)));
     const rect = viewportRef.current?.getBoundingClientRect();
     const w = rect?.width ?? 800;
     const h = rect?.height ?? 500;
@@ -263,7 +269,11 @@ export default function Canvas() {
         status: 'running',
         mediaUrl: null,
       };
-      setDoc((d) => ({ ...d, nodes: [...d.nodes, node] }));
+      setDoc((d) => ({
+        ...d,
+        nodes: [...d.nodes, node],
+        links: bound ? [...(d.links || []), { from: bound.id, to: node.id }] : d.links || [],
+      }));
       setSelected([node.id]);
       setPrompt('');
       toast('节点已提交生成', 'ok');
@@ -307,43 +317,38 @@ export default function Canvas() {
     return () => clearInterval(t);
   }, [doc.nodes, syncJobs]);
 
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return undefined;
+    const ro = new ResizeObserver(() => setVpSize({ w: el.clientWidth, h: el.clientHeight }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const boundNode = selected.length === 1 ? doc.nodes.find((n) => n.id === selected[0]) : null;
+
+  const nodeById = Object.fromEntries(doc.nodes.map((n) => [n.id, n]));
+  const links = (doc.links || []).filter((l) => nodeById[l.from] && nodeById[l.to]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* ---------------- 标题 ---------------- */}
-      <div className="flex shrink-0 items-start justify-between px-8 pb-3 pt-5">
+      <div className="flex shrink-0 items-center justify-between gap-4 px-7 pb-3 pt-5">
         <div>
-          <p className="eyebrow">Canvas · Workflow</p>
-          <h1 className="mt-1.5 flex items-center gap-2 text-[28px] font-semibold tracking-tight text-white">
+          <h1 className="flex items-center gap-2 text-[22px] font-semibold tracking-tight text-white">
             无限画布
-            <span className="mx-1 h-1.5 w-1.5 rounded-full bg-brand-400" />
-            <span className="brand-text">节点自己干活</span>
+            <span className="h-2 w-2 rounded-full bg-brand-400 shadow-[0_0_8px_rgba(79,227,193,.8)]" />
           </h1>
+          <p className="mt-1 text-[12.5px] text-mist-400">在无限画布中自由组织创意与生成视频</p>
         </div>
-        <button
-          onClick={fitView}
-          className="rounded-full border border-[#232a38] px-4 py-2 text-[12.5px] text-mist-300 transition hover:border-brand-500/50 hover:text-white"
-        >
-          适应画布
-        </button>
+        <span className="flex items-center gap-1.5 text-[11.5px] text-mist-400">
+          <span className={clsx('h-1.5 w-1.5 rounded-full', saved ? 'bg-brand-400' : 'bg-mist-400')} />
+          {saved ? '已自动保存' : '保存中…'}
+        </span>
       </div>
 
       {/* ---------------- 画布 ---------------- */}
-      <div className="relative mx-6 mb-4 min-h-0 flex-1 overflow-hidden rounded-2xl border border-[#1a2030] bg-[#080b12]">
-        {/* 工具栏 */}
-        <div className="absolute left-3 top-3 z-20 flex flex-wrap items-center gap-2">
-          <span className="flex items-center gap-1.5 rounded-lg border border-[#232a38] bg-[#0d1119]/90 px-2.5 py-1.5 text-[11.5px] text-mist-300 backdrop-blur">
-            画布 · 默认 · 自动保存
-            <span className={clsx('text-[11px]', saved ? 'text-brand-400' : 'text-mist-400')}>
-              {saved ? '✓' : '…'}
-            </span>
-          </span>
-          <span className="hidden rounded-lg bg-[#0d1119]/80 px-2 py-1.5 font-mono text-[10px] text-mist-400 backdrop-blur lg:block">
-            中键/空格+拖动 移动画布 · 滚轮 缩放 · 左键框选 · Shift 多选 · Delete 移除选中
-          </span>
-        </div>
-
+      <div className="relative mx-5 mb-5 min-h-0 flex-1 overflow-hidden rounded-2xl border border-white/[0.06]">
         {/* 视图 */}
         <div
           ref={viewportRef}
@@ -351,11 +356,9 @@ export default function Canvas() {
           onWheel={onWheel}
           onMouseDown={onBackgroundDown}
           onContextMenu={(e) => e.preventDefault()}
-          className="absolute inset-0 cursor-default select-none"
+          className={clsx('dot-grid absolute inset-0 select-none', tool === 'hand' ? 'cursor-grab active:cursor-grabbing' : 'cursor-default')}
           style={{
-            backgroundImage:
-              'radial-gradient(circle at 1px 1px, rgba(255,255,255,.055) 1px, transparent 0)',
-            backgroundSize: `${24 * view.z}px ${24 * view.z}px`,
+            backgroundSize: `${22 * view.z}px ${22 * view.z}px`,
             backgroundPosition: `${view.x}px ${view.y}px`,
           }}
         >
@@ -363,6 +366,29 @@ export default function Canvas() {
             className="absolute left-0 top-0 origin-top-left"
             style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})` }}
           >
+            {/* 连线 */}
+            <svg className="pointer-events-none absolute left-0 top-0 overflow-visible" width="1" height="1">
+              {links.map((l) => {
+                const a = nodeById[l.from];
+                const b = nodeById[l.to];
+                const x1 = a.x + NODE_W;
+                const y1 = a.y + nodeH(a) / 2;
+                const x2 = b.x;
+                const y2 = b.y + nodeH(b) / 2;
+                const mx = (x1 + x2) / 2;
+                return (
+                  <path
+                    key={l.from + l.to}
+                    d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`}
+                    fill="none"
+                    stroke="rgba(184,192,208,.45)"
+                    strokeWidth="1.5"
+                    strokeDasharray="5 5"
+                  />
+                );
+              })}
+            </svg>
+
             {doc.nodes.map((n) => (
               <CanvasNode
                 key={n.id}
@@ -378,120 +404,88 @@ export default function Canvas() {
           </div>
         </div>
 
-        {/* 左侧节点按钮 */}
-        <div className="absolute left-3 top-1/2 z-20 flex -translate-y-1/2 flex-col gap-1">
-          {[
-            { icon: Type, label: '文本', type: 'text' },
-            { icon: ImageIcon, label: '图片', type: 'image' },
-            { icon: Film, label: '视频', type: 'video' },
-          ].map((b) => (
-            <button
-              key={b.type}
-              onClick={() => addNode(b.type)}
-              title={`新建${b.label}节点`}
-              className="grid h-8 w-8 place-items-center rounded-lg border border-[#232a38] bg-[#0d1119]/90 text-mist-400 backdrop-blur transition hover:border-brand-500/50 hover:text-brand-300"
-            >
-              <b.icon size={13} />
-            </button>
-          ))}
+        {/* 顶部工具栏 */}
+        <div className="absolute left-4 top-4 z-20 flex items-center gap-1 rounded-2xl border border-white/[0.07] bg-[#121726]/90 p-1.5 shadow-xl backdrop-blur">
+          <ToolBtn icon={MousePointer2} active={tool === 'select'} onClick={() => setTool('select')} title="选择 (V)" />
+          <ToolBtn icon={Hand} active={tool === 'hand'} onClick={() => setTool('hand')} title="抓手 (H)" />
+          <Sep />
+          <ToolBtn icon={Type} onClick={() => addNode('text')} title="新建文本节点" />
+          <ToolBtn icon={ImageIcon} onClick={() => addNode('image')} title="新建图片节点" />
+          <ToolBtn icon={Video} onClick={() => addNode('video')} title="新建视频节点" />
+          <Sep />
+          <ToolBtn icon={ZoomOut} onClick={() => zoomBy(1 / 1.15)} title="缩小" />
           <button
-            onClick={removeSelected}
-            disabled={!selected.length}
-            title="删除选中"
-            className="grid h-8 w-8 place-items-center rounded-lg border border-[#232a38] bg-[#0d1119]/90 text-mist-400 backdrop-blur transition hover:border-rose-500/50 hover:text-rose-400 disabled:opacity-40"
+            onClick={() => setView((v) => ({ ...v, z: 1 }))}
+            title="重置为 100%"
+            className="flex h-9 min-w-[70px] items-center justify-center gap-1 rounded-xl border border-white/[0.06] px-2 font-mono text-[12px] text-mist-200 hover:text-white"
           >
-            <Trash2 size={13} />
+            {Math.round(view.z * 100)}% <ChevronDown size={12} className="text-mist-400" />
           </button>
+          <ToolBtn icon={ZoomIn} onClick={() => zoomBy(1.15)} title="放大" />
+          <Sep />
+          <ToolBtn icon={Maximize} onClick={fitView} title="适应画布" />
+          <ToolBtn icon={Trash2} onClick={removeSelected} disabled={!selected.length} danger title="删除选中 (Delete)" />
         </div>
 
-        {/* 右下缩放控件 */}
-        <div className="absolute bottom-4 right-3 z-20 flex flex-col items-center gap-0.5 rounded-full border border-[#232a38] bg-[#0d1119]/95 p-1 backdrop-blur">
-          <ZoomBtn icon={Plus} onClick={() => zoomBy(1.15)} />
-          <ZoomBtn icon={FolderClosed} onClick={() => toast('画布分组：开发中')} />
-          <ZoomBtn icon={Scissors} onClick={() => toast('框选模式：开发中')} />
-          <ZoomBtn icon={Grid3x3} onClick={fitView} />
-          <ZoomBtn icon={ZoomOut} onClick={() => zoomBy(1 / 1.15)} />
-          <span className="py-0.5 font-mono text-[9.5px] text-mist-400">{Math.round(view.z * 100)}%</span>
-          <ZoomBtn icon={ZoomIn} onClick={() => zoomBy(1.15)} />
-          <ZoomBtn icon={Maximize2} onClick={fitView} />
-        </div>
+        <span className="pointer-events-none absolute right-4 top-5 z-20 hidden font-mono text-[10px] text-mist-400/70 xl:block">
+          滚轮缩放 · 中键/空格/抓手 拖动 · Shift 多选 · 双击编辑
+        </span>
 
-        {/* 底部输入区 */}
-        <div className="absolute bottom-3 left-3 right-16 z-20">
-          <div className="mb-1.5 flex items-center gap-2">
-            <span className="flex items-center gap-1.5 rounded-full bg-brand-500/15 px-2.5 py-1 text-[10.5px] text-brand-300">
-              <span className="h-1 w-1 rounded-full bg-brand-400" />
-              已绑定节点{selected.length || 0} · {boundNode ? (boundNode.type === 'text' ? '文本' : boundNode.type === 'video' ? '视频' : '图片') : '未选中'} ·{' '}
-              {boundNode ? 'TEXT 模式' : '空闲'}
+        {/* 小地图 */}
+        <Minimap nodes={doc.nodes} view={view} vp={vpSize} />
+
+        {/* 底部悬浮生成条 */}
+        <div className="absolute bottom-5 left-1/2 z-20 w-[min(760px,calc(100%-300px))] min-w-[420px] -translate-x-1/2">
+          <div className="mb-2 flex items-center justify-center gap-2">
+            <span className="flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-[#121726]/90 px-3 py-1 text-[11px] text-mist-300 backdrop-blur">
+              <span className={clsx('h-1.5 w-1.5 rounded-full', boundNode ? 'bg-brand-400' : 'bg-mist-400')} />
+              {boundNode ? `已绑定：${boundNode.label}（生成结果会连到它右侧）` : '未绑定节点 · 结果放在画布中央'}
             </span>
-            <button
-              onClick={() => setSelected([])}
-              className="flex items-center gap-0.5 text-[10.5px] text-mist-400 hover:text-mist-200"
-            >
-              解除 <X size={9} />
-            </button>
+            {boundNode && (
+              <button onClick={() => setSelected([])} className="flex items-center gap-0.5 text-[11px] text-mist-400 hover:text-mist-200">
+                解除 <X size={10} />
+              </button>
+            )}
           </div>
-
-          <div className="rounded-2xl border border-[#232a38] bg-[#0d1119]/95 p-2 backdrop-blur-xl">
-            <textarea
+          <div className="flex items-center gap-2 rounded-2xl border border-brand-400/30 bg-[#121726]/95 p-2 shadow-[0_0_0_1px_rgba(79,227,193,.08),0_20px_50px_-20px_rgba(0,0,0,.9),0_0_40px_-18px_rgba(79,227,193,.5)] backdrop-blur-xl">
+            <button
+              onClick={() => addNode('image')}
+              title="添加图片节点"
+              className="flex h-11 shrink-0 items-center gap-2 rounded-xl px-3 text-[12.5px] text-mist-200 transition hover:bg-white/5 hover:text-white"
+            >
+              <ImagePlus size={16} /> 添加图片
+            </button>
+            <input
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) generate(); }}
-              rows={2}
-              placeholder="输入文本内容，例如：雨夜断桥，白素贞立于西湖畔，回眸轻叹…"
-              className="w-full resize-none bg-transparent px-2 py-1 text-[12.5px] leading-relaxed text-mist-100 outline-none placeholder:text-mist-400/70"
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); generate(); } }}
+              placeholder="描述你想要生成的视频内容…"
+              className="h-11 min-w-0 flex-1 rounded-xl border border-white/[0.06] bg-[#0d111c] px-3.5 text-[13px] text-mist-100 outline-none placeholder:text-mist-400/70 focus:border-brand-400/50"
             />
-
-            <div className="flex flex-wrap items-center gap-2 px-1">
-              <button className="flex items-center gap-1.5 rounded-lg border border-[#232a38] px-2.5 py-1.5 text-[11px] text-mist-300 transition hover:border-[#2c3448] hover:text-white">
-                <MousePointer2 size={11} className="text-brand-400" /> 选择模型
-                <span className="font-mono text-[10px] text-brand-300">muse-video</span>
-              </button>
-
-              <div className="flex items-center gap-0.5 rounded-lg border border-[#232a38] p-0.5">
-                {[5, 8, 10].map((d) => (
-                  <button
-                    key={d}
-                    onClick={() => setDuration(d)}
-                    className={clsx(
-                      'rounded px-1.5 py-0.5 font-mono text-[10px] transition',
-                      duration === d ? 'bg-brand-500/15 text-brand-300' : 'text-mist-400 hover:text-mist-200'
-                    )}
-                  >
-                    {d}s
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex items-center gap-0.5 rounded-lg border border-[#232a38] p-0.5">
-                {['16:9', '9:16'].map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setSize(s)}
-                    className={clsx(
-                      'rounded px-1.5 py-0.5 font-mono text-[10px] transition',
-                      size === s ? 'bg-brand-500/15 text-brand-300' : 'text-mist-400 hover:text-mist-200'
-                    )}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-
-              <div className="ml-auto flex items-center gap-2.5">
-                <span className="font-mono text-[10px] tracking-wider text-mist-400">
-                  COST <span className="text-gold-400">{10 + 2 * duration}</span> 积分
-                </span>
-                <button
-                  onClick={generate}
-                  disabled={busy}
-                  className="flex items-center gap-1 rounded-full brand-gradient px-4 py-1.5 text-[12px] font-semibold text-white shadow-lg shadow-brand-600/25 transition hover:brightness-110 disabled:opacity-50"
-                >
-                  {busy ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
-                  生成
-                </button>
-              </div>
-            </div>
+            <select
+              value={duration}
+              onChange={(e) => setDuration(Number(e.target.value))}
+              className="h-11 cursor-pointer rounded-xl border border-white/[0.06] bg-[#0d111c] px-2 font-mono text-[12px] text-mist-200 outline-none"
+              title="时长"
+            >
+              {[5, 8, 10].map((d) => <option key={d} value={d}>{d}s</option>)}
+            </select>
+            <select
+              value={size}
+              onChange={(e) => setSize(e.target.value)}
+              className="h-11 cursor-pointer rounded-xl border border-white/[0.06] bg-[#0d111c] px-2 font-mono text-[12px] text-mist-200 outline-none"
+              title="比例"
+            >
+              {['16:9', '9:16', '1:1'].map((x) => <option key={x} value={x}>{x}</option>)}
+            </select>
+            <button
+              onClick={generate}
+              disabled={busy}
+              className="mint-btn flex h-11 shrink-0 items-center gap-2 rounded-xl px-5 text-[14px] font-semibold"
+            >
+              {busy ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+              生成
+            </button>
           </div>
         </div>
       </div>
@@ -499,87 +493,152 @@ export default function Canvas() {
   );
 }
 
-function ZoomBtn({ icon: Icon, onClick }) {
+function pruneLinks(d) {
+  const ids = new Set(d.nodes.map((n) => n.id));
+  return { ...d, links: (d.links || []).filter((l) => ids.has(l.from) && ids.has(l.to)) };
+}
+
+function Sep() {
+  return <span className="mx-1 h-5 w-px bg-white/[0.08]" />;
+}
+
+function ToolBtn({ icon: Icon, onClick, active, disabled, danger, title }) {
   return (
     <button
       onClick={onClick}
-      className="grid h-6 w-6 place-items-center rounded-full text-mist-400 transition hover:bg-ink-700 hover:text-white"
+      disabled={disabled}
+      title={title}
+      className={clsx(
+        'grid h-9 w-9 place-items-center rounded-xl transition disabled:opacity-35',
+        active ? 'bg-white/[0.08] text-white' : 'text-mist-300 hover:bg-white/5 hover:text-white',
+        danger && 'hover:!text-rose-400'
+      )}
     >
-      <Icon size={11} />
+      <Icon size={16} />
     </button>
+  );
+}
+
+function Minimap({ nodes, view, vp }) {
+  const W = 176;
+  const H = 116;
+  if (!nodes.length) return null;
+  const vx0 = -view.x / view.z;
+  const vy0 = -view.y / view.z;
+  const vw = vp.w / view.z;
+  const vh = vp.h / view.z;
+  const minX = Math.min(vx0, ...nodes.map((n) => n.x)) - 40;
+  const minY = Math.min(vy0, ...nodes.map((n) => n.y)) - 40;
+  const maxX = Math.max(vx0 + vw, ...nodes.map((n) => n.x + NODE_W)) + 40;
+  const maxY = Math.max(vy0 + vh, ...nodes.map((n) => n.y + nodeH(n))) + 40;
+  const k = Math.min(W / (maxX - minX), H / (maxY - minY));
+  const tx = (x) => (x - minX) * k;
+  const ty = (y) => (y - minY) * k;
+
+  return (
+    <div className="absolute bottom-5 right-5 z-20 hidden rounded-2xl border border-white/[0.07] bg-[#121726]/90 p-2.5 shadow-xl backdrop-blur md:block">
+      <div className="mb-2 flex items-center justify-between px-0.5">
+        <span className="flex items-center gap-1.5 text-[11.5px] text-mist-200">
+          <MapIcon size={12} className="text-mist-400" /> 小地图
+        </span>
+        <Expand size={11} className="text-mist-400" />
+      </div>
+      <div className="dot-grid relative overflow-hidden rounded-xl" style={{ width: W, height: H, backgroundSize: '10px 10px' }}>
+        {nodes.map((n) => (
+          <span
+            key={n.id}
+            className="absolute rounded-[3px] border border-mist-300/40 bg-mist-300/25"
+            style={{ left: tx(n.x), top: ty(n.y), width: Math.max(4, NODE_W * k), height: Math.max(3, nodeH(n) * k) }}
+          />
+        ))}
+        <span
+          className="absolute rounded-[4px] border border-brand-400/70 bg-brand-400/5"
+          style={{ left: tx(vx0), top: ty(vy0), width: vw * k, height: vh * k }}
+        />
+      </div>
+    </div>
   );
 }
 
 function CanvasNode({ node, active, onMouseDown, onDoubleClick }) {
   const running = node.status === 'running';
   const failed = node.status === 'failed';
+  const isText = node.type === 'text';
+  const Icon = isText ? Type : node.type === 'image' ? ImageIcon : Video;
+  const title = isText ? '文本提示词' : node.type === 'image' ? '图片' : '视频预览';
+  const role = isText ? '输入' : '输出';
+  const fileName = node.mediaUrl ? decodeURIComponent(node.mediaUrl.split('/').pop().split('?')[0]) : null;
 
   return (
     <div
       onMouseDown={onMouseDown}
       onDoubleClick={onDoubleClick}
       style={{ left: node.x, top: node.y, width: NODE_W }}
-      className={clsx(
-        'absolute cursor-grab rounded-xl border bg-[#0c1119]/95 px-2.5 py-2 backdrop-blur transition-shadow active:cursor-grabbing',
-        active
-          ? 'border-brand-400/80 shadow-[0_0_0_1px_rgba(79,227,193,.35),0_0_28px_-6px_rgba(79,227,193,.55)]'
-          : 'border-[#232a38] hover:border-[#33405a]'
-      )}
+      className={clsx('glass-node absolute cursor-grab p-3.5 active:cursor-grabbing', active && 'is-active')}
     >
       {/* 连接点 */}
-      {[
-        '-left-1 top-1/2 -translate-y-1/2',
-        '-right-1 top-1/2 -translate-y-1/2',
-        'left-1/2 -top-1 -translate-x-1/2',
-        'left-1/2 -bottom-1 -translate-x-1/2',
-      ].map((pos) => (
+      {['-left-[7px]', '-right-[7px]'].map((pos) => (
         <span
           key={pos}
-          className={clsx('absolute h-1.5 w-1.5 rounded-full border border-[#33405a] bg-[#0d1119]', pos)}
+          className={clsx(
+            'absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full border-2 bg-[#0d111c]',
+            active ? 'border-brand-400' : 'border-mist-400/60',
+            pos
+          )}
         />
       ))}
 
-      <div className="mb-1 flex items-center justify-between">
-        <span className="flex items-center gap-1 text-[10px] font-medium text-mist-200">
-          <span className={clsx('h-1 w-1 rounded-full', active ? 'bg-brand-400' : 'bg-mist-400')} />
-          {node.label}
+      <div className="mb-2.5 flex items-center justify-between">
+        <span className="flex items-center gap-2 text-[13px] font-semibold text-white">
+          <Icon size={15} className="text-brand-400" />
+          {title}
         </span>
-        <span className="font-mono text-[8px] tracking-wider text-mist-400">
-          {node.type === 'text' ? 'TEXT' : node.type === 'image' ? 'IMG' : 'VID'}
-        </span>
+        <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-mist-300">{role}</span>
       </div>
 
-      {node.type === 'text' ? (
-        <p className="line-clamp-3 text-[10px] leading-relaxed text-mist-300">
-          {node.text || '空文本'}
+      {isText ? (
+        <p className="line-clamp-4 min-h-[76px] rounded-xl border border-white/[0.06] bg-[#0d111c]/80 px-3 py-2.5 text-[12px] leading-relaxed text-mist-200">
+          {node.text || '空文本，双击编辑'}
         </p>
       ) : (
-        <div className="relative overflow-hidden rounded-lg bg-black/40">
+        <div className="relative overflow-hidden rounded-xl bg-black/40">
           {node.mediaUrl ? (
             node.type === 'video' ? (
-              <video src={node.mediaUrl} muted loop playsInline className="h-[62px] w-full object-cover" />
+              <video src={node.mediaUrl} muted loop playsInline autoPlay className="h-[128px] w-full object-cover" />
             ) : (
-              <img src={node.mediaUrl} alt="" className="h-[62px] w-full object-cover" />
+              <img src={node.mediaUrl} alt="" className="h-[128px] w-full object-cover" />
             )
           ) : (
-            <div className="grid h-[62px] place-items-center">
+            <div className="grid h-[128px] place-items-center bg-[radial-gradient(circle_at_30%_20%,rgba(15,169,138,.14),transparent_60%)]">
               {running ? (
-                <div className="flex items-center gap-1 text-[9.5px] text-brand-400">
-                  <Loader2 size={11} className="animate-spin" /> {node.progress || 0}%
+                <div className="flex items-center gap-1.5 text-[12px] text-brand-300">
+                  <Loader2 size={14} className="animate-spin" /> {node.progress || 0}%
                 </div>
               ) : failed ? (
-                <span className="text-[9px] text-rose-400">失败</span>
+                <span className="text-[11.5px] text-rose-400">生成失败</span>
               ) : (
-                <span className="text-[9px] text-mist-400">待生成</span>
+                <span className="text-[11.5px] text-mist-400">待生成</span>
               )}
             </div>
           )}
         </div>
       )}
 
-      {node.type !== 'text' && (
-        <p className="mt-1 line-clamp-1 text-[9px] text-mist-400">{node.text}</p>
-      )}
+      <div className="mt-2.5 flex items-center justify-between gap-2 text-[11px]">
+        {isText ? (
+          <span className="flex items-center gap-1.5 text-mist-400">
+            <Sparkles size={12} /> muse-video
+          </span>
+        ) : (
+          <>
+            <span className="truncate text-mist-200" title={node.text}>{fileName || node.text || node.label}</span>
+            <span className={clsx('flex shrink-0 items-center gap-1', failed ? 'text-rose-300' : running ? 'text-mist-300' : node.mediaUrl ? 'text-brand-300' : 'text-mist-400')}>
+              <span className={clsx('h-1.5 w-1.5 rounded-full', failed ? 'bg-rose-400' : running ? 'bg-amber-400' : node.mediaUrl ? 'bg-brand-400' : 'bg-mist-400')} />
+              {failed ? '失败' : running ? '生成中' : node.mediaUrl ? '生成完成' : '空'}
+            </span>
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -19,6 +19,31 @@
 
 ---
 
+## 产品原型
+
+深色创作台风格：底色 `#0a0d16`，薄荷绿 `#0fa98a → #4fe3c1` 点缀；细侧栏只保留三个入口。当前界面已按这三张原型重做。
+
+<table>
+  <tr>
+    <td colspan="2" align="center">
+      <img src="docs/prototypes/create.png" alt="快捷创作" width="100%"><br>
+      <b>快捷创作</b> · 项目栏 + 任务网格 + 底部 WORKBENCH（提示词 / 参考画面 / 时长 / 比例 / Params / Queue / Generate）
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/prototypes/canvas.png" alt="无限画布" width="100%"><br>
+      <b>无限画布</b> · 点状网格、玻璃节点、悬浮生成条、小地图
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/prototypes/accounts.png" alt="muse 导入" width="100%"><br>
+      <b>muse 导入</b> · 账号卡片 + 周额度 + 右侧一键绑定流程
+    </td>
+  </tr>
+</table>
+
+---
+
 ## 快速开始
 
 ### 环境

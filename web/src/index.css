@@ -9,8 +9,8 @@
   --color-ink-950: #060810;
   --color-ink-900: #0a0d16;
   --color-ink-850: #0d1019;
-  --color-ink-800: #12161f;
-  --color-ink-750: #151a25;
+  --color-ink-800: #121726;
+  --color-ink-750: #151a2b;
   --color-ink-700: #1a1f2b;
   --color-ink-600: #262c3a;
   --color-ink-500: #333b4d;
@@ -104,8 +104,67 @@
   /* 标准卡片 */
   .card {
     background: var(--color-ink-800);
-    border: 1px solid #1c2230;
+    border: 1px solid rgb(255 255 255 / 0.06);
     border-radius: 16px;
+  }
+  /* 面板（工作台 / 抽屉） */
+  .panel {
+    background: color-mix(in srgb, #121726 92%, transparent);
+    border: 1px solid rgb(255 255 255 / 0.06);
+    border-radius: 16px;
+  }
+  /* 玻璃节点（无限画布） */
+  .glass-node {
+    background: color-mix(in srgb, #151a2b 78%, transparent);
+    border: 1px solid rgb(255 255 255 / 0.08);
+    border-radius: 16px;
+    backdrop-filter: blur(14px);
+    box-shadow: 0 18px 40px -18px rgb(0 0 0 / 0.6), inset 0 1px 0 rgb(255 255 255 / 0.04);
+  }
+  .glass-node.is-active {
+    border-color: rgb(79 227 193 / 0.75);
+    box-shadow:
+      0 0 0 1px rgb(79 227 193 / 0.35),
+      0 0 36px -8px rgb(79 227 193 / 0.5),
+      0 18px 40px -18px rgb(0 0 0 / 0.6);
+  }
+  /* 点状无限网格 */
+  .dot-grid {
+    background-color: #080b13;
+    background-image: radial-gradient(circle at 1px 1px, rgb(255 255 255 / 0.07) 1px, transparent 0);
+  }
+  /* 薄荷主按钮 */
+  .mint-btn {
+    background-image: linear-gradient(135deg, #4fe3c1 0%, #1cc6a0 40%, #0fa98a 100%);
+    color: #04211a;
+    box-shadow: 0 10px 30px -10px rgb(15 169 138 / 0.7), inset 0 1px 0 rgb(255 255 255 / 0.25);
+    transition: filter 0.15s, transform 0.15s;
+  }
+  .mint-btn:hover { filter: brightness(1.07); }
+  .mint-btn:active { transform: scale(0.985); }
+  .mint-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  /* 分段选择器 */
+  .seg {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 12px;
+    background: #0d111c;
+    border: 1px solid rgb(255 255 255 / 0.06);
+  }
+  .seg > button {
+    min-width: 52px;
+    padding: 6px 12px;
+    border-radius: 9px;
+    font-size: 12.5px;
+    color: var(--color-mist-300);
+    transition: background 0.15s, color 0.15s;
+  }
+  .seg > button:hover { color: #fff; }
+  .seg > button.on {
+    background: linear-gradient(135deg, #1cc6a0, #0fa98a);
+    color: #fff;
+    box-shadow: 0 4px 14px -6px rgb(15 169 138 / 0.8);
   }
   .card-hover {
     transition: border-color 0.18s, background 0.18s, transform 0.18s;
@@ -120,11 +179,10 @@
     position: relative;
     background-color: var(--color-ink-900);
     background-image:
-      radial-gradient(900px 420px at 18% -8%, rgb(15 169 138 / 0.10), transparent 70%),
+      radial-gradient(900px 420px at 18% -8%, rgb(15 169 138 / 0.07), transparent 70%),
       radial-gradient(700px 380px at 92% -12%, rgb(56 200 240 / 0.06), transparent 70%),
-      linear-gradient(to right, rgb(255 255 255 / 0.018) 1px, transparent 1px),
-      linear-gradient(to bottom, rgb(255 255 255 / 0.018) 1px, transparent 1px);
-    background-size: 100% 100%, 100% 100%, 44px 44px, 44px 44px;
+      none;
+    background-size: 100% 100%, 100% 100%;
   }
 
   /* 小标签（ARCHIVE / WORKSPACE 那种） */
