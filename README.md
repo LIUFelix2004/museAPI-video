@@ -83,9 +83,9 @@ cd museAPI-video
 
 | 功能 | 路由 | 说明 |
 |---|---|---|
-| **快捷创作** | `/create` | 项目栏 + 任务网格 + WORKBENCH：提示词、`@` 引用参考图、模型/时长/画幅、参数面板、任务队列、生成 |
+| **快捷创作** | `/create` | 项目栏 + 作品网格 + WORKBENCH：提示词、**参考素材（图/视频）**、时长/画幅、参数面板、任务队列、**灵感库** |
 | **无限画布** | `/canvas` | 节点拖拽、缩放平移、多选删除、双击改文本、自动保存、节点级生成 |
-| **muse 导入** | `/accounts` | 三种导入方式、额度查询、检测、保活、删除 |
+| **muse 导入** | `/accounts` | **四种导入方式**（自动导入 / 一键绑定 / 粘贴 / 上游直连）、额度查询、检测、保活、删除 |
 
 登录后直接进入 `/create`，侧栏只有这三项。
 
@@ -104,21 +104,76 @@ muse.ai 的登录态主要靠 `hatch_sess`，它是 **HttpOnly** Cookie：
 - 在页面里执行 `document.cookie` —— **读不到它**
 - DevTools → Application 能看到它，但那是浏览器内部视图，网页 JS 访问不到
 
-想拿到它，只有三条路：**浏览器扩展**（能读 HttpOnly）、**从网络请求头里抄**、或 **让上游自己的浏览器登录一次**。下面三种导入方式对应这三条路。
+想拿到它，有四条路：**CDP 调试协议**（让浏览器自己交出来）、**浏览器扩展**（能读 HttpOnly）、**从网络请求头里抄**、或 **让上游自己的浏览器登录一次**。下面四种导入方式对应这四条路。
 
-### 三种方式对比
+### 四种方式对比
 
 | 方式 | 是否手拷 Cookie | 需要什么 | 适合 |
 |---|---|---|---|
-| **一、一键绑定**（推荐） | 不用 | 装一次浏览器扩展 | 日常使用，最省事 |
-| **二、手动粘贴** | 要，从 Network 面板抄 | 会用 DevTools | 不想装扩展，或临时加号 |
-| **三、上游面板直连** | 不用 | 上游 key | 调试，或用上游自带导号工具 |
+| **一、自动导入**（最省事） | 不用 | 本机 Chrome，或指纹浏览器开着调试端口 | 本机已有登录态，管理员操作 |
+| **二、一键绑定** | 不用 | 装一次浏览器扩展 | 通用，跨机器 |
+| **三、手动粘贴** | 要，从 Network 面板抄 | 会用 DevTools | 兜底，不想装任何东西 |
+| **四、上游面板直连** | 不用 | 上游 key | 调试，或用上游自带导号工具 |
 
 ---
 
-### 方式一：一键绑定（推荐）
+### 方式一：自动导入（推荐，零操作）
+
+原理：平台直接连浏览器的 **CDP 调试端口**，用 `Storage.getCookies` 读出**全部** Cookie（包括 HttpOnly 的 `hatch_sess`）→ 提交给上游入库。全程不开 F12、不装扩展。
+
+#### 两个入口
+
+打开 **muse 导入 → 自动导入**，弹窗里有两个标签：
+
+**A. 本机 Chrome（可多环境）**
+
+适合一台机器上开着多个 Chrome profile 的情况。
+
+1. 下拉里会列出本机所有 profile（含名称和最后使用时间）
+2. 选中你登录 muse.ai 的那个环境
+3. 点 **「重启 Chrome 并导入」**
+
+⚠️ 首次使用会**关闭当前所有 Chrome 窗口**（同一 profile 不能开两个实例带调试端口），然后用 `--restore-last-session` 重启，标签页会恢复。之后调试端口一直开着，再导入就不用重启了。
+
+**B. 自定义端口（指纹浏览器）**
+
+适合 AdsPower、BitBrowser 这类多账号浏览器。
+
+1. 先在指纹浏览器里**启动目标环境**
+2. 回到平台点 **「扫描本机」** —— 会自动列出所有正在监听的 CDP 端口，并**标出哪个有 muse 登录态**
+3. 点选那个端口（或手动填），点 **「连接并导入」**
+
+扫描结果大概长这样：
+
+```
+port 1524   Chrome/151.0.7922.47   有 muse 登录态
+port 56312  Chrome/151.0.7922.47   未登录 muse
+```
+
+#### 常用操作
+
+- **扫描本机**：列出所有 CDP 端口，优先选中带 muse 登录态的那个
+- **重新检查**：刷新端口和 Chrome 运行状态
+- **关闭调试模式**：把 Chrome 恢复成不带端口的普通启动（导入完成后建议点一下）
+
+> **安全提示**：调试端口只绑定 `127.0.0.1`，外网访问不到；但开启期间**本机任何程序都能读到该浏览器的 Cookie**。导入完建议关掉。
+
+#### 常见报错
+
+| 提示 | 原因 |
+|---|---|
+| 读不到 N 端口的 Cookie：调试端口未就绪 | 没有浏览器以调试模式运行，先让 Chrome「重启」或启动指纹浏览器环境 |
+| 这个 Chrome 里没有 muse.ai 的 Cookie | 选错了 profile，或该环境没登录 muse.ai |
+| 读到 Cookie 但没有 hatch_sess | 登录态已失效，重新登录后再导 |
+
+---
+
+### 方式二：一键绑定（跨机器通用）
 
 原理：平台页面生成一次性绑定码 → 扩展在浏览器里读出 muse.ai 的全部 Cookie（含 HttpOnly）→ 提交给平台 → 平台转给上游入库。
+
+和方式一的区别：**不需要重启浏览器，也不需要本机可访问**，适合给远程的人用。
+
 
 #### 第 1 步：安装扩展（只需一次）
 
@@ -177,7 +232,7 @@ muse.ai 的登录态主要靠 `hatch_sess`，它是 **HttpOnly** Cookie：
 
 ---
 
-### 方式二：手动粘贴 Cookie
+### 方式三：手动粘贴 Cookie
 
 不想装扩展，或只想临时加个账号时用这个。
 
@@ -234,7 +289,7 @@ hatch_sess=eyJhbGciOi...; hatch_vml=v1%3A...; hatch_native_auth_device=...; datr
 
 ---
 
-### 方式三：上游面板直连
+### 方式四：上游面板直连
 
 也可以在上游管理页直接导号：<http://127.0.0.1:18610/admin>
 
@@ -287,12 +342,50 @@ muse 会话约 **48 小时**。到期后：
 
 ### 快捷创作 `/create`
 
+**生成一条视频：**
+
 1. 在底部 WORKBENCH 写画面描述
-2. 可选：点「图片」上传参考图（最多 3 张），正文里用 `@` 引用
+2. 可选：在「参考素材」里上传图片或视频（最多 3 个），正文用 `@` 引用
 3. 选时长（5 / 6 / 8 / 10 秒）和画幅（16:9 / 9:16 / 1:1）
 4. 点 **「生成」**
 
 任务状态在中间网格实时刷新；完成后可预览、下载、删除。
+
+#### 参考素材（图片 + 视频）
+
+上游支持**图片、视频、音频、文档**混合作为参考，类型按文件头识别。
+
+| 限制 | 值 |
+|---|---|
+| 素材总数 | 10 个（平台限制为 3 个） |
+| 单个大小 | 40 MB |
+| 总大小 | 100 MB |
+| **视频时长** | **≤ 120 秒** |
+
+平台上传时按 MIME 自动分流：图片进 `images`，视频进 `videos`，音频进 `audios`。
+提示词里可以用 `@图` / `@视频` 指代，上游会转成 `[图N]` / `[视频N]` 的编号引用。
+
+> 视频作为参考时，muse 具体怎么利用它（风格参考 / 续写 / 首尾帧）由模型决定，建议先拿短片段试。
+
+#### 灵感库
+
+创作页顶部有 **「作品 / 灵感」** 切换。灵感库融合自
+[Awesome-muse-video-prompts-and-skills](https://github.com/imagineVid/Awesome-muse-video-prompts-and-skills)：
+
+- **5 个场景分类**：全部 / 剧情短片 / 产品广告 / 物理与动画 / 沉浸视角
+- **9 个经过验证的案例**：每个带完整英文提示词、时长画幅标注、来源署名
+- **镜头简报公式**（可折叠）：
+
+```
+[DURATION + ASPECT RATIO]. [SUBJECT] performs [VISIBLE ACTION] in [SETTING].
+Camera: [FRAMING + MOVE]. Beats: [TIMED ACTIONS].
+Audio: [DIALOGUE + FOLEY + AMBIENCE]. Preserve: [IDENTITY / PRODUCT / LAYOUT].
+Avoid: [FAILURE MODES].
+```
+
+点案例卡片会**同时填入提示词、时长和画幅**——这点很重要，能避免「控件 5s/16:9 但提示词写 9:16/10秒」导致的模型拒答。
+
+> 提示词保留英文原文：Muse Video 是英文模型，原文比译文稳。编辑文本遵循 CC BY 4.0，第三方提示词与创作者署名保留原样。
 
 **参数面板**：WORKBENCH 里的「参数」按钮，可调 Stylize / Chaos / Weird / IW / CW / SW / Seed / Quality，会拼成 `--st 100 --chaos 20` 这类字符串传给上游。
 
@@ -327,13 +420,20 @@ museAPI-video/
 │   └── src/
 │       ├── index.js         入口
 │       ├── db.js            表结构与读写
-│       ├── muse.js          上游客户端
+│       ├── muse.js          上游客户端（含额度查询）
 │       ├── auth.js          登录
 │       ├── worker.js        任务轮询 + 队列调度
-│       └── routes/          auth / accounts / generate / queue / chat …
+│       └── routes/
+│           ├── accounts.js  账号池 + 一键绑定 + 额度解析
+│           ├── chrome.js    CDP 自动导入（多环境 / 端口扫描）
+│           ├── generate.js  生成任务（参考素材分流）
+│           └── …            auth / queue / chat / v1 …
 └── web/                     前端（React + Vite + Tailwind）
     ├── public/fonts/        自托管字体
-    └── src/pages/           Create / Canvas / Accounts / Login / Bind
+    └── src/
+        ├── pages/           Create / Canvas / Accounts / Login / Bind
+        ├── components/      ChromeImportModal（自动导入）/ QueueDrawer / ParamsPanel
+        └── data/            inspirations.js（灵感库 + 镜头简报公式）
 ```
 
 ---
@@ -362,6 +462,15 @@ museAPI-video/
 
 ## 常见问题
 
+**Q：自动导入点「重启 Chrome 并导入」，会不会丢东西？**  
+会关掉当前所有 Chrome 窗口，但用 `--restore-last-session` 重启，标签页会恢复。唯一风险是页面上**没保存的表单**，操作前先存一下。
+
+**Q：自动导入扫不到端口 / 提示「调试端口未就绪」**  
+说明当前没有浏览器以调试模式运行。两条路：选「本机 Chrome」标签让平台重启一次；或在 AdsPower / BitBrowser 里先**启动目标环境**，再点「扫描本机」。
+
+**Q：有多个 muse 账号分别在不同环境里，怎么都导进来？**  
+每次导入会自动用**环境名**做备注（选「8号」profile 就存成「8号」）。重复操作即可，账号池会按「最久未用」轮转，互不阻塞。
+
 **Q：导入成功了，但点生成提示「没有可用账号」**  
 上游账号池为空，或账号状态是「异常」。去 muse 导入页看卡片状态，点「检测」确认。
 
@@ -369,13 +478,16 @@ museAPI-video/
 表格按字母排序，`hatch_sess` 在 `hatch_gw`、`hatch_native_auth_device` 下面，往下滚。若确实没有，说明这个浏览器没有登录成功。
 
 **Q：`document.cookie` 里没有 `hatch_sess`**  
-正常。它是 HttpOnly，JS 读不到。用 Network 面板或扩展。
+正常。它是 HttpOnly，JS 读不到。用自动导入、Network 面板或扩展。
+
+**Q：上传视频后生成失败**  
+先看视频是否超过 **120 秒**或 **40 MB**——这两个是上游硬限制。另外视频参考的具体效果取决于 muse，建议先用短片段试。
 
 **Q：生成一直卡在「生成中」**  
 上游在跑浏览器，第一次启动 Chrome 会慢一些。超过 15 分钟会自动判失败并退还。若一直不动，看 `upstream/muse2api/server.log`。
 
 **Q：账号只用了几天就「异常」了**  
-muse 会话约 48 小时，属正常。重新绑定即可。
+muse 会话约 48 小时，属正常。重新导入即可。上游有自动保活，能续上时会自动延长期限。
 
 **Q：部署到服务器后打不开或 401**  
 检查 `server/.env` 的 `MUSE_BASE` 是否指向上游；Nginx 反代建议放大超时并关闭 buffering：
@@ -418,5 +530,11 @@ node scripts/test-extension-logic.mjs  # 扩展逻辑（沙箱执行 background.
 
 ## 许可与致谢
 
-- 上游引擎：[muse2api](https://github.com/czg86389-hub/muse2api)
-- 本仓库平台层按仓库内文件约定使用；对外部署请自行遵守 muse.ai 服务条款
+- **上游引擎**：[muse2api](https://github.com/czg86389-hub/muse2api)（MIT），位于 `upstream/muse2api/`，未作修改。
+- **灵感库**：编辑文本与分类结构来自
+  [Awesome-muse-video-prompts-and-skills](https://github.com/imagineVid/Awesome-muse-video-prompts-and-skills)
+  （ImagineVid 编辑内容，[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)）。
+  其中的第三方提示词、创作者署名、商标、图片与视频版权归各自所有者，不在该许可范围内；
+  本项目使用时保留了原始提示词文本与创作者来源。
+- **字体**：Baloo 2 与 JetBrains Mono，自托管于 `web/public/fonts/`，遵循各自 OFL 许可。
+- **平台层**：按仓库内文件约定使用；对外部署请自行遵守 muse.ai 服务条款。
