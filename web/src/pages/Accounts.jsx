@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Plus, Trash2, RefreshCw, ShieldCheck, KeyRound, ClipboardPaste, ExternalLink, ChevronDown, Info,
-  Link2, Copy, CheckCircle2, Loader2, HelpCircle, Search, Activity, Download, Clipboard, Lock,
+  Link2, Copy, CheckCircle2, Loader2, HelpCircle, Search, Activity, Download, Clipboard, Lock, Chrome,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { api, fmtAgo } from '../lib/api.js';
 import { useAuth } from '../store/auth.jsx';
 import { Badge, Button, Drawer, Empty, Field, Input, Modal, Textarea, useToast } from '../components/ui.jsx';
+import ChromeImportModal from '../components/ChromeImportModal.jsx';
 
 const STATUS = {
   ok: { tone: 'ok', label: '可用' },
@@ -23,6 +24,7 @@ export default function Accounts() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [bindOpen, setBindOpen] = useState(false);
+  const [chromeOpen, setChromeOpen] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [guide, setGuide] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
@@ -111,8 +113,13 @@ export default function Accounts() {
             {user?.role === 'admin' ? '管理员导入的账号公共可用。' : '你导入的账号仅自己可见。'}
           </p>
         </div>
-        <div className="flex gap-2.5">
-          <Button onClick={() => setBindOpen(true)} className="h-11 px-5">
+        <div className="flex flex-wrap gap-2.5">
+          {user?.role === 'admin' && (
+            <Button onClick={() => setChromeOpen(true)} className="h-11 px-5">
+              <Chrome size={16} /> 自动导入
+            </Button>
+          )}
+          <Button variant={user?.role === 'admin' ? 'outline' : 'primary'} onClick={() => setBindOpen(true)} className="h-11 px-5">
             <Link2 size={15} /> 一键绑定
           </Button>
           <Button variant="outline" onClick={() => setOpen(true)} className="h-11 px-5">
@@ -125,20 +132,27 @@ export default function Accounts() {
       {guide && (
         <div className="panel mb-5 space-y-2.5 px-5 py-4 text-[12.5px] leading-relaxed text-mist-400 fade-in">
           <p className="flex items-center gap-2 text-[13px] font-medium text-mist-200">
-            <Info size={14} className="text-brand-400" /> 怎么拿到 Cookie？
+            <Info size={14} className="text-brand-400" /> 三种导入方式，按省事程度排
+          </p>
+          {user?.role === 'admin' && (
+            <p>
+              <b className="text-brand-300">方式一（最省事）</b>：点
+              <b className="text-brand-300">「自动导入」</b> —— 平台直接读取本机 Chrome 里已登录的 muse.ai 会话，
+              不用装扩展、不用开 F12。代价是要以调试模式重启一次 Chrome（标签页会自动恢复）。
+            </p>
+          )}
+          <p>
+            <b className="text-mist-200">方式{user?.role === 'admin' ? '二' : '一'}（需装一次扩展）</b>：点
+            <b className="text-mist-300">「一键绑定」</b>生成链接 → 在<span className="text-mist-200">已登录 muse.ai 的那个浏览器</span>里打开 →
+            扩展自动读取登录态并入库。扩展只需装一次，之后每次绑定两下点完。
           </p>
           <p>
-            <b className="text-mist-200">方式一（推荐，免 F12）</b>：点右上角
-            <b className="text-brand-300">「一键绑定」</b>生成链接 → 在<span className="text-mist-200">已登录 muse.ai 的那个浏览器</span>里打开 →
-            扩展自动读取登录态并入库。扩展只需装一次。
-          </p>
-          <p>
-            <b className="text-mist-200">方式二（手动兜底）</b>：点「粘贴 Cookie」，用 Chrome 打开{' '}
+            <b className="text-mist-200">方式{user?.role === 'admin' ? '三' : '二'}（手动兜底）</b>：点「粘贴 Cookie」，用 Chrome 打开{' '}
             <a className="text-brand-400 hover:underline" href="https://muse.ai/" target="_blank" rel="noreferrer">muse.ai <ExternalLink size={10} className="inline" /></a>
-            {' '}登录 → <kbd className="rounded bg-white/5 px-1.5 py-0.5 text-[11px]">F12</kbd> → <b className="text-mist-200">Application → Cookies → https://muse.ai</b> →
-            复制整段（至少含 <code className="rounded bg-white/5 px-1 text-[11px]">hatch_sess</code>）。
+            {' '}登录 → <kbd className="rounded bg-white/5 px-1.5 py-0.5 text-[11px]">F12</kbd> → Network 面板 → 任意请求的
+            <code className="mx-1 rounded bg-white/5 px-1 text-[11px]">cookie:</code> 请求头 → 复制整段。
           </p>
-          <p className="text-ink-500">会话约 48 小时有效，过期后重新绑定即可。多个账号可以重复绑定，池子自动轮转。</p>
+          <p className="text-ink-500">会话约 48 小时有效，过期后重新导入即可。多个账号可以重复绑定，池子自动轮转。</p>
         </div>
       )}
 
@@ -238,6 +252,12 @@ export default function Accounts() {
       <BindDrawer
         open={bindOpen}
         onClose={() => setBindOpen(false)}
+        onDone={load}
+      />
+
+      <ChromeImportModal
+        open={chromeOpen}
+        onClose={() => setChromeOpen(false)}
         onDone={load}
       />
     </div>

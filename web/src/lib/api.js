@@ -47,6 +47,13 @@ export const api = {
   keepaliveAccount: (id) => request(`/api/accounts/${id}/keepalive`, { method: 'POST' }),
   deleteAccount: (id) => request(`/api/accounts/${id}`, { method: 'DELETE' }),
 
+  chromeStatus: (port) => request(`/api/chrome/status${port ? `?port=${port}` : ''}`),
+  chromeProfiles: () => request('/api/chrome/profiles'),
+  chromeBind: (label, port) => request('/api/chrome/bind', { method: 'POST', body: { label, port } }),
+  chromeRestartBind: (label, profileDir) => request('/api/chrome/restart-bind', { method: 'POST', body: { label, profileDir } }),
+  chromeCloseDebug: () => request('/api/chrome/close-debug', { method: 'POST' }),
+  chromeScan: () => request('/api/chrome/scan', { method: 'POST' }),
+
   createVideo: (b) => request('/api/videos', { method: 'POST', body: b }),
   createImage: (b) => request('/api/images', { method: 'POST', body: b }),
   jobs: (q = {}) => {

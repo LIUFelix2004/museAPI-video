@@ -15,8 +15,16 @@ server/server.err.log
 web/dev.log
 web/dev.err.log
 
-# 环境配置（含密钥）
+# 环境配置（含密钥）—— 匹配任意层级
 .env
+**/.env
 
-# 截图（按需保留）
-shots/*.png
+# 本地截图与临时文件
+shots/
+Museroll/
+.chrome-profile/
+*.crdownload
+*.part
+
+# 交接文档（含本机运营信息，不入公开仓库）
+HANDOVER.md

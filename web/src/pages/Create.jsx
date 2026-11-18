@@ -10,13 +10,7 @@ import { useAuth } from '../store/auth.jsx';
 import { useToast, Modal } from '../components/ui.jsx';
 import QueueDrawer from '../components/QueueDrawer.jsx';
 import ParamsPanel, { buildExtra, PARAM_DEFAULTS } from '../components/ParamsPanel.jsx';
-
-const IDEAS = [
-  '国风少女：汉服少女立于桃花树下，花瓣纷飞，电影感光效',
-  '赛博都市：雨夜霓虹街道，机甲少年回眸，赛博朋克风格',
-  '水墨山水：云雾缭绕的黄山奇松，水墨晕染，大面积留白',
-  '柴犬侦探：戴圆框眼镜的柴犬，复古英伦风插画，暖色调',
-];
+import { SCENES, INSPIRATIONS, FORMULA, inspirationsByScene } from '../data/inspirations.js';
 
 const STORE_KEY = 'xm_projects';
 
@@ -45,6 +39,10 @@ export default function Create() {
   const [paramsOpen, setParamsOpen] = useState(false);
   const [params, setParams] = useState({ ...PARAM_DEFAULTS });
   const [summary, setSummary] = useState(null);
+  const [scene, setScene] = useState('all');
+  const [showFormula, setShowFormula] = useState(false);
+  const [view, setView] = useState('works'); // works | inspire
+  const [jobsLoaded, setJobsLoaded] = useState(false);
 
   const fileRef = useRef(null);
   const pollRef = useRef(null);
@@ -79,10 +77,16 @@ export default function Create() {
     try {
       const out = await api.jobs({ pageSize: 18 });
       setJobs(out.jobs);
+      setJobsLoaded(true);
     } catch { /* ignore */ }
   }, []);
 
   useEffect(() => { loadJobs(); }, [loadJobs]);
+
+  // 没有任何作品时，直接把视图切到「灵感」，别让用户面对空白
+  useEffect(() => {
+    if (jobsLoaded && jobs.length === 0) setView('inspire');
+  }, [jobsLoaded, jobs.length]);
 
   // 账号池额度（顶栏与底部提示共用）
   useEffect(() => {
@@ -113,14 +117,28 @@ export default function Create() {
   }, [jobs, refresh]);
 
   /* ---------- 上传 ---------- */
+  const MAX_REFS = 3;
   const onPick = async (files) => {
     if (!files?.length) return;
-    if (refs.length + files.length > 3) return toast('最多 3 张参考图', 'error');
+    const list = Array.from(files);
+
+    // 视频限制：上游单素材 40MB、时长 120 秒
+    for (const f of list) {
+      if (f.type.startsWith('video/') && f.size > 40 * 1024 * 1024) {
+        return toast(`视频「${f.name}」超过 40MB，请压缩后再上传`, 'error');
+      }
+    }
+    if (refs.length + list.length > MAX_REFS) return toast(`最多 ${MAX_REFS} 个参考素材`, 'error');
+
     setUploading(true);
     try {
-      const out = await api.upload(Array.from(files));
-      setRefs((r) => [...r, ...out.files].slice(0, 3));
-      toast('图片已上传', 'ok');
+      const out = await api.upload(list);
+      const withType = (out.files || []).map((f) => ({
+        ...f,
+        kind: String(f.mime || '').startsWith('video/') ? 'video' : 'image',
+      }));
+      setRefs((r) => [...r, ...withType].slice(0, MAX_REFS));
+      toast('参考素材已上传', 'ok');
     } catch (e) {
       toast(e.message, 'error');
     } finally {
@@ -139,7 +157,7 @@ export default function Create() {
         prompt: prompt.trim(),
         duration,
         size,
-        images: refs.map((r) => r.url),
+        images: refs.map((r) => ({ url: r.url, mime: r.mime })),
         extra: buildExtra(params),
       });
       setPrompt('');
@@ -276,6 +294,16 @@ export default function Create() {
           </div>
           <div className="flex items-center gap-2">
             <div className="seg">
+              {[
+                ['works', '作品'],
+                ['inspire', '灵感'],
+              ].map(([k, label]) => (
+                <button key={k} onClick={() => setView(k)} className={clsx(view === k && 'on')} style={{ minWidth: 0, padding: '4px 12px', fontSize: 12 }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="seg">
               {[['all', '全部'], ['done', '已完成']].map(([k, label]) => (
                 <button key={k} onClick={() => setFilter(k)} className={clsx(filter === k && 'on')} style={{ minWidth: 0, padding: '4px 12px', fontSize: 12 }}>
                   {label}
@@ -291,23 +319,97 @@ export default function Create() {
           </div>
         </div>
 
-        {shown.length === 0 ? (
-          <div className="flex h-[calc(100%-40px)] min-h-[260px] flex-col items-center justify-center pb-6">
-            <div className="grid h-14 w-14 place-items-center rounded-2xl border border-white/[0.07] bg-ink-800">
-              <Sparkles size={22} className="text-brand-400" />
-            </div>
-            <h3 className="mt-4 text-[15px] font-medium text-mist-100">在下方工作台描述画面，开始创作</h3>
-            <p className="mt-1.5 text-[12.5px] text-mist-400">支持文生视频、参考图生成，生成进度会实时显示在这里</p>
-            <div className="mt-6 flex max-w-[640px] flex-wrap justify-center gap-2">
-              {IDEAS.map((idea) => (
+        {(view === 'inspire' || shown.length === 0) ? (
+          <div className="mx-auto max-w-[1180px] pb-6">
+            {/* 场景卡片 */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              {SCENES.map((s) => (
                 <button
-                  key={idea}
-                  onClick={() => setPrompt(idea)}
-                  className="rounded-xl border border-white/[0.07] bg-white/[0.02] px-3.5 py-2 text-[12px] text-mist-300 transition hover:border-brand-400/40 hover:text-white"
+                  key={s.id}
+                  onClick={() => setScene(s.id)}
+                  className={clsx(
+                    'group relative overflow-hidden rounded-2xl border p-3.5 text-left transition',
+                    scene === s.id
+                      ? 'border-brand-400/60 bg-brand-500/[0.08]'
+                      : 'border-white/[0.07] hover:border-white/15'
+                  )}
                 >
-                  {idea.split('：')[0]}
+                  <div className={clsx('pointer-events-none absolute inset-0 bg-gradient-to-br opacity-60', s.grad)} />
+                  <div className="relative">
+                    <p className="text-[13px] font-medium text-white">{s.title}</p>
+                    <p className="mt-1 text-[10.5px] leading-snug text-mist-400">{s.desc}</p>
+                  </div>
                 </button>
               ))}
+            </div>
+
+            {/* 灵感库 */}
+            <div className="mt-7">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-[13px] font-medium text-mist-200">
+                  灵感
+                  <span className="ml-1.5 text-[11px] font-normal text-ink-500">
+                    {inspirationsByScene(scene).length} 个真实案例
+                  </span>
+                </h3>
+                <button
+                  onClick={() => setShowFormula((v) => !v)}
+                  className="flex items-center gap-1 text-[11.5px] text-brand-400 hover:text-brand-300"
+                >
+                  <Sparkles size={11} /> 镜头简报公式 {showFormula ? '收起' : '展开'}
+                </button>
+              </div>
+
+              {showFormula && (
+                <div className="mb-4 rounded-2xl border border-brand-500/25 bg-brand-500/[0.05] p-4">
+                  <pre className="whitespace-pre-wrap break-words rounded-lg bg-black/40 p-3 font-mono text-[10.5px] leading-relaxed text-mist-300">
+{FORMULA.pattern}
+                  </pre>
+                  <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
+                    {FORMULA.rules.map((r) => (
+                      <p key={r.k} className="text-[11px] leading-relaxed text-mist-400">
+                        <b className="text-mist-200">{r.k}</b> · {r.v}
+                      </p>
+                    ))}
+                  </div>
+                  <p className="mt-2.5 text-[10px] text-ink-500">
+                    来源：Awesome-muse-video-prompts-and-skills（CC BY 4.0 编辑文本）
+                  </p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {inspirationsByScene(scene).map((it) => (
+                  <button
+                    key={it.id}
+                    onClick={() => {
+                      setPrompt(it.prompt);
+                      setDuration([5, 8, 10].includes(it.duration) ? it.duration : 5);
+                      setSize(it.size === '9:16' ? '9:16' : '16:9');
+                      toast(`已填入「${it.title}」`, 'ok');
+                    }}
+                    className="group flex flex-col rounded-2xl border border-white/[0.07] bg-white/[0.015] p-3.5 text-left transition hover:border-brand-400/40 hover:bg-white/[0.03]"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-[13px] font-medium text-mist-100 group-hover:text-white">{it.title}</p>
+                      <span className="shrink-0 rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-[9px] text-mist-400">
+                        {it.duration}s · {it.size}
+                      </span>
+                    </div>
+                    <p className="mt-1.5 line-clamp-3 text-[11px] leading-relaxed text-mist-400">
+                      {it.prompt}
+                    </p>
+                    <div className="mt-2.5 flex flex-wrap items-center gap-1">
+                      {it.tags.map((t) => (
+                        <span key={t} className="rounded bg-white/[0.04] px-1.5 py-0.5 text-[9.5px] text-mist-400">
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="mt-2 truncate text-[9.5px] text-ink-500">{it.source}</p>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         ) : (
@@ -343,18 +445,30 @@ export default function Create() {
               </span>
             </div>
 
-            {/* 参考画面 */}
+            {/* 参考素材（图片 / 视频） */}
             <div className="lg:w-[44%]">
-              <p className="mb-2 text-[12.5px] font-medium text-mist-200">参考画面</p>
+              <p className="mb-2 text-[12.5px] font-medium text-mist-200">
+                参考素材
+                <span className="ml-1.5 text-[10.5px] font-normal text-mist-400">图片或视频</span>
+              </p>
               <div className="flex flex-wrap items-center gap-2">
                 {refs.map((r) => (
                   <div
                     key={r.url}
                     className="flex items-center gap-2 rounded-xl border border-white/[0.07] bg-[#0d111c] py-1 pl-1 pr-2"
                   >
-                    <img src={r.url} alt="" className="h-9 w-12 rounded-lg object-cover" />
-                    <span className="max-w-[130px] truncate text-[12px] text-mist-200">
-                      @ {r.name || r.url.split('/').pop()}
+                    {r.kind === 'video' ? (
+                      <div className="relative h-9 w-12 shrink-0 overflow-hidden rounded-lg bg-black">
+                        <video src={r.url} muted className="h-full w-full object-cover" />
+                        <span className="absolute bottom-0 right-0 rounded-tl bg-black/70 px-1 text-[8px] text-white">
+                          视频
+                        </span>
+                      </div>
+                    ) : (
+                      <img src={r.url} alt="" className="h-9 w-12 shrink-0 rounded-lg object-cover" />
+                    )}
+                    <span className="max-w-[120px] truncate text-[12px] text-mist-200">
+                      @{r.kind === 'video' ? '视频' : '图'} {r.name || r.url.split('/').pop()}
                     </span>
                     <button
                       onClick={() => setRefs((l) => l.filter((x) => x.url !== r.url))}
@@ -367,17 +481,28 @@ export default function Create() {
                 {refs.length < 3 && (
                   <button
                     onClick={() => fileRef.current?.click()}
-                    title="上传参考图（最多 3 张）"
+                    title="上传参考图片或视频（最多 3 个）"
                     className="grid h-11 w-11 place-items-center rounded-xl border border-white/[0.07] bg-[#0d111c] text-mist-300 transition hover:border-brand-400/50 hover:text-brand-300"
                   >
                     {uploading ? <Loader2 size={15} className="animate-spin" /> : <Plus size={16} />}
                   </button>
                 )}
                 {refs.length === 0 && (
-                  <span className="text-[11.5px] text-mist-400">可选，最多 3 张，提示词中用 @ 引用</span>
+                  <span className="text-[11.5px] leading-relaxed text-mist-400">
+                    可选，最多 3 个（图/视频混放）
+                    <br />
+                    视频 ≤120 秒、≤40MB；提示词里用 @ 引用
+                  </span>
                 )}
               </div>
-              <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => onPick(e.target.files)} />
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*,video/*"
+                multiple
+                hidden
+                onChange={(e) => onPick(e.target.files)}
+              />
             </div>
           </div>
 

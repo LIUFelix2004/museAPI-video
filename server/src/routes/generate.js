@@ -45,26 +45,53 @@ function toDataUrl(localUrl) {
   const ext = path.extname(file).toLowerCase();
   const mime = MIME[ext] || 'application/octet-stream';
   const b64 = fs.readFileSync(file).toString('base64');
-  return `data:${mime};base64,${b64}`;
+  return { url: `data:${mime};base64,${b64}`, mime };
 }
 
+/**
+ * 把前端传来的参考素材分成 images / videos / audios。
+ * 上游会按 MIME 自己再识别一次，这里分流只是为了用对字段。
+ */
 function normalizeRefs(list) {
-  if (!Array.isArray(list)) return [];
-  const out = [];
+  const images = [];
+  const videos = [];
+  const audios = [];
+  if (!Array.isArray(list)) return { images, videos, audios };
+
   for (const item of list) {
     if (!item) continue;
+
+    let url = null;
+    let mime = null;
+
     if (typeof item === 'string') {
       if (item.startsWith('/uploads/')) {
         const d = toDataUrl(item);
-        if (d) out.push({ url: d });
+        if (d) { url = d.url; mime = d.mime; }
       } else if (/^(https?:|data:)/i.test(item)) {
-        out.push({ url: item });
+        url = item;
+        const m = /^data:([^;]+)/i.exec(item);
+        if (m) mime = m[1];
       }
     } else if (item.url) {
-      out.push(item);
+      url = item.url;
+      mime = item.mime || (/^data:([^;]+)/i.exec(item.url)?.[1] ?? null);
     }
+
+    if (!url) continue;
+
+    // 没有 MIME 时按扩展名猜
+    if (!mime) {
+      const ext = path.extname(String(url).split('?')[0]).toLowerCase();
+      mime = MIME[ext] || '';
+    }
+
+    if (mime.startsWith('video/')) videos.push({ url, mime });
+    else if (mime.startsWith('audio/')) audios.push({ url, mime });
+    else images.push({ url, mime });
   }
-  return out;
+
+  return { images, videos, audios };
 }
 
 /* ------------------------------ 上传 ------------------------------ */
@@ -104,7 +131,10 @@ r.post('/videos', requireAuth, async (req, res) => {
       duration: dur,
       size: params.size,
     };
-    if (refs.length) payload.images = refs;
+    // 上游按 images / videos / audios 三个字段接收，各自列表要保持顺序
+    if (refs.images.length) payload.images = refs.images;
+    if (refs.videos.length) payload.videos = refs.videos;
+    if (refs.audios.length) payload.audios = refs.audios;
     if (extra) payload.extra = String(extra).slice(0, 500);
 
     const out = await muse.createVideo(payload);
@@ -140,7 +170,9 @@ r.post('/images', requireAuth, async (req, res) => {
   try {
     const refs = normalizeRefs(images);
     const payload = { prompt: String(prompt).trim(), model: 'muse-image', size: params.size };
-    if (refs.length) payload.images = refs;
+    if (refs.images.length) payload.images = refs.images;
+    if (refs.videos.length) payload.videos = refs.videos;
+    if (refs.audios.length) payload.audios = refs.audios;
 
     const out = await muse.createImageTask(payload);
     const upstreamId = out?.id || out?.task_id;
