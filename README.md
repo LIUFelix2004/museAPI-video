@@ -538,3 +538,13 @@ node scripts/test-extension-logic.mjs  # 扩展逻辑（沙箱执行 background.
   本项目使用时保留了原始提示词文本与创作者来源。
 - **字体**：Baloo 2 与 JetBrains Mono，自托管于 `web/public/fonts/`，遵循各自 OFL 许可。
 - **平台层**：按仓库内文件约定使用；对外部署请自行遵守 muse.ai 服务条款。
+
+<!-- felix-ai-shop:start -->
+
+---
+
+### 🛒 Felix AI 工具小铺
+
+各种低价 AI 工具，稳定直供 → **[felixaitools.shop/](https://felixaitools.shop/)**
+
+<!-- felix-ai-shop:end -->
